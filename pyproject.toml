@@ -85,6 +85,10 @@ select = [
     "RUF",      # ruff-specific
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Cyrillic test data is deliberate: emails in other alphabets must work.
+"tests/**" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
