@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch makes the running workflow obsolete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and type-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e . --group dev
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+
+  test:
+    name: Tests (Python ${{ matrix.python }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.12" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.14" }
+          - { os: windows-latest, python: "3.11" }
+          - { os: windows-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.11" }
+          - { os: macos-latest, python: "3.14" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e . --group dev
+      - run: python -m coverage run -m pytest
+      - run: python -m coverage report
+
+  # Service containers only run on Linux runners, so the tests against a real Mailpit run on Ubuntu.
+  integration:
+    name: Integration (Mailpit ${{ matrix.mailpit }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported version and the newest one.
+        mailpit: ["v1.22.3", "latest"]
+    services:
+      mailpit:
+        image: axllent/mailpit:${{ matrix.mailpit }}
+        ports:
+          - 8025:8025
+          - 1025:1025
+        env:
+          # Reverse DNS lookups of the SMTP client can delay every message by seconds in containers.
+          MP_SMTP_DISABLE_RDNS: "true"
+    env:
+      MAILPIT_URL: http://localhost:8025/
+      MAILPIT_SMTP: localhost:1025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e . --group dev
+      - name: Wait for Mailpit
+        run: curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 "${MAILPIT_URL}api/v1/info"
+      - run: python -m pytest -m integration
+
+  # The single check to require on main: fails if any job failed or was cancelled.
+  ci-passed:
+    name: CI passed
+    if: ${{ always() }}
+    needs: [lint, test, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the results of the other jobs
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A required job ended with: $result"
+              exit 1
+            fi
+          done
