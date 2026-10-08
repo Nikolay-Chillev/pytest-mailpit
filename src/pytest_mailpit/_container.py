@@ -3,8 +3,13 @@
 from typing import Any
 
 # Settings of the container: no reverse DNS lookups, which delay every message
-# by seconds in containers, and Chaos, so mailpit_chaos works.
-CONTAINER_ENV = {"MP_SMTP_DISABLE_RDNS": "true", "MP_ENABLE_CHAOS": "true"}
+# by seconds in containers; Chaos, so mailpit_chaos works; and no asking GitHub
+# for the latest release, which can hold up a fresh container for 10 s.
+CONTAINER_ENV = {
+    "MP_SMTP_DISABLE_RDNS": "true",
+    "MP_ENABLE_CHAOS": "true",
+    "MP_DISABLE_VERSION_CHECK": "true",
+}
 
 
 def container_class() -> Any:

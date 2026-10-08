@@ -433,7 +433,9 @@ def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
     # whole chain of requests and urllib3 exceptions above the message.
     unreachable = problem = None
     try:
-        info = client.info()
+        # Not /api/v1/info: it makes Mailpit ask GitHub for its latest release first,
+        # which takes up to 10 s where outbound connections hang (see MailpitClient.info).
+        client.messages(limit=1)
     except MailpitConnectionError as error:
         unreachable = (
             f"Cannot reach Mailpit at {client.url} ({_root_cause(error)}).\n"
@@ -454,15 +456,28 @@ def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
         pytest.fail(unreachable, pytrace=False)
     if problem is not None:
         pytest.fail(problem, pytrace=False)
-    version = _version(info.version)
-    if version is not None and version < OLDEST_SUPPORTED_VERSION:
-        oldest = ".".join(map(str, OLDEST_SUPPORTED_VERSION))
-        warnings.warn(
-            f"Mailpit {info.version} is older than {oldest}, the oldest version "
-            "pytest-mailpit is tested with; some features may not work.",
-            MailpitWarning,
-            stacklevel=1,
-        )
+    _warn_if_too_old(client)
+
+
+def _warn_if_too_old(client: MailpitClient) -> None:
+    """Warn about a Mailpit older than the oldest version pytest-mailpit supports.
+
+    Mailpit 1.22 added /api/v1/chaos, so an older one answers 404 there. Its
+    version number is only in /api/v1/info, which is slow (see _check_server).
+    """
+    try:
+        client.chaos()
+    except MailpitAPIError as error:
+        if error.status_code == 404:
+            oldest = ".".join(map(str, OLDEST_SUPPORTED_VERSION))
+            warnings.warn(
+                f"Mailpit at {client.url} is older than {oldest}, the oldest version "
+                "pytest-mailpit is tested with; some features may not work.",
+                MailpitWarning,
+                stacklevel=1,
+            )
+    except MailpitError:
+        pass  # 400 means Chaos is off; anything else is for the tests to report
 
 
 def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
@@ -485,7 +500,7 @@ def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
 def _warn_if_nearly_full(client: MailpitClient) -> None:
     """Warn when Mailpit may soon delete the messages that failed tests kept."""
     try:
-        held = client.info().messages
+        held = client.messages(limit=1).total
     except MailpitError:
         return  # Mailpit went away; the failed tests already said what they could.
     if held >= MAILPIT_DEFAULT_MAX_MESSAGES * 0.9:
@@ -552,8 +567,3 @@ def _verify(value: str | None, default: bool | str) -> bool | str:
     if value.strip().lower() in ("0", "false", "no", "off"):
         return False
     return value  # a CA bundle
-
-
-def _version(version: str) -> tuple[int, ...] | None:
-    match = re.match(r"v?(\d+)\.(\d+)", version)
-    return tuple(int(part) for part in match.groups()) if match else None

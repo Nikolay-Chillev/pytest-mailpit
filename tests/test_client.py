@@ -325,3 +325,60 @@ def test_view_url_is_the_message_page_in_the_web_ui() -> None:
     client = MailpitClient("http://user:secret@mailpit.test/mailpit")
 
     assert client.view_url("Aa1Bb2") == "http://mailpit.test/mailpit/view/Aa1Bb2"
+
+
+# Redirects are never followed
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_a_delete_is_never_sent_to_where_a_redirect_points(
+    client: MailpitClient, status: int
+) -> None:
+    # After a 301, requests would resend the DELETE without its IDs, and Mailpit would
+    # delete every message; after a 302, it would send a GET that changes nothing.
+    https = "https://mailpit.test/api/v1/messages"
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mocked:
+        mocked.delete(f"{URL}api/v1/messages", status=status, headers={"Location": https})
+        mocked.delete(https, body="ok")
+        mocked.get(https, json=samples.MESSAGE_LIST)
+
+        with pytest.raises(MailpitAPIError) as error:
+            client.delete_messages(["m1"])
+
+        assert [call.request.url for call in mocked.calls] == [f"{URL}api/v1/messages"]
+    assert error.value.status_code == status
+    assert str(error.value) == (
+        f"DELETE {URL}api/v1/messages returned HTTP {status}: "
+        "it redirects to https://mailpit.test/; point pytest-mailpit at that URL"
+    )
+
+
+def test_reads_are_not_redirected_either(mocked: responses.RequestsMock) -> None:
+    client = MailpitClient("http://qa:secret@mailpit.test/mailpit/")
+    mocked.get(
+        "http://qa:secret@mailpit.test/mailpit/api/v1/messages",
+        status=302,
+        headers={"Location": "/sso/login?next=/mailpit/api/v1/messages"},
+    )
+
+    with pytest.raises(MailpitAPIError) as error:
+        client.messages()
+
+    assert str(error.value).endswith(
+        "it redirects to http://mailpit.test/sso/login?next=/mailpit/api/v1/messages; "
+        "pytest-mailpit needs a URL that answers without redirects"
+    )
+
+
+def test_a_redirect_keeps_credentials_out_of_the_message(mocked: responses.RequestsMock) -> None:
+    client = MailpitClient("http://qa:secret@mailpit.test/")
+    location = "https://qa:secret@mailpit.test/api/v1/tags"
+    mocked.put(
+        "http://qa:secret@mailpit.test/api/v1/tags", status=308, headers={"Location": location}
+    )
+
+    with pytest.raises(MailpitAPIError) as error:
+        client.set_tags(["m1"], ["x"])
+
+    assert "secret" not in str(error.value)
+    assert "it redirects to https://mailpit.test/;" in str(error.value)

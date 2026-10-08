@@ -36,7 +36,6 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit at the default URL, holding one message for every inbox."""
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
         mock.add_callback(responses.GET, SEARCH, callback=_one_message_per_address)
         mock.get(MESSAGE, json=samples.MESSAGE)
         mock.get(f"{URL}api/v1/messages", json=page())
@@ -246,7 +245,7 @@ def test_unreachable_mailpit_fails_with_what_to_do(pytester: pytest.Pytester) ->
 
     with responses.RequestsMock() as mock:
         refused = requests.ConnectionError("[Errno 111] Connection refused")
-        mock.get(f"{URL}api/v1/info", body=refused)
+        mock.get(f"{URL}api/v1/messages", body=refused)
         result = pytester.runpytest()
 
     result.assert_outcomes(errors=1)
@@ -290,7 +289,7 @@ def test_unreachable_mailpit_can_skip_the_tests(pytester: pytest.Pytester) -> No
     ("status", "message"),
     [
         (401, "*requires a username and password: set MAILPIT_USERNAME and MAILPIT_PASSWORD.*"),
-        (500, "*cannot be used: GET http://localhost:8025/api/v1/info returned HTTP 500*"),
+        (500, "*cannot be used: GET http://localhost:8025/api/v1/messages?* returned HTTP 500*"),
     ],
 )
 def test_mailpit_answering_with_an_error(
@@ -299,7 +298,7 @@ def test_mailpit_answering_with_an_error(
     pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
 
     with responses.RequestsMock() as mock:
-        mock.get(f"{URL}api/v1/info", status=status, body="nope")
+        mock.get(f"{URL}api/v1/messages", status=status, body="nope")
         result = pytester.runpytest()
 
     result.assert_outcomes(errors=1)
@@ -307,15 +306,62 @@ def test_mailpit_answering_with_an_error(
     assert "During handling of the above exception" not in result.stdout.str()
 
 
+def test_a_redirecting_url_stops_the_tests_before_any_cleanup(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_needs_mailpit(mailpit_inbox): pass")
+    target = "https://localhost:8025/api/v1/messages?start=0&limit=1"
+
+    with responses.RequestsMock() as mock:
+        mock.get(f"{URL}api/v1/messages", status=301, headers={"Location": target})
+        result = pytester.runpytest()
+        # The check stopped the test: no DELETE ever went to Mailpit.
+        assert [call.request.method for call in mock.calls] == ["GET"]
+
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(
+        [
+            "Mailpit at http://localhost:8025/ cannot be used: GET http://localhost:8025/"
+            "api/v1/messages?start=0&limit=1 returned HTTP 301: it redirects to "
+            "https://localhost:8025/; point pytest-mailpit at that URL"
+        ]
+    )
+
+
 def test_old_mailpit_versions_get_a_warning(pytester: pytest.Pytester) -> None:
     pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
 
     with responses.RequestsMock() as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO | {"Version": "v1.20.3"})
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
+        # Mailpit 1.22 added the Chaos API.
+        mock.get(f"{URL}api/v1/chaos", status=404, body="404 page not found")
         result = pytester.runpytest()
 
     result.assert_outcomes(passed=1, warnings=1)
-    result.stdout.fnmatch_lines(["*Mailpit v1.20.3 is older than 1.22*"])
+    result.stdout.fnmatch_lines(["*Mailpit at http://localhost:8025/ is older than 1.22*"])
+
+
+@pytest.mark.parametrize(
+    ("status", "body"), [(200, json.dumps({})), (400, "Chaos is not enabled"), (500, "oops")]
+)
+def test_mailpit_1_22_or_newer_gets_no_warning(
+    pytester: pytest.Pytester, status: int, body: str
+) -> None:
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
+
+    with responses.RequestsMock() as mock:
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
+        mock.get(f"{URL}api/v1/chaos", status=status, body=body)
+        pytester.runpytest().assert_outcomes(passed=1, warnings=0)
+
+
+def test_the_plugin_never_asks_for_info(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    # /api/v1/info makes Mailpit ask GitHub for its latest release first, which can take 10 s.
+    pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
+
+    pytester.runpytest().assert_outcomes(failed=1)
+
+    assert not [call for call in server.calls if "/api/v1/info" in (call.request.url or "")]
 
 
 def test_the_client_is_shared_by_the_session(
@@ -335,8 +381,13 @@ def test_the_client_is_shared_by_the_session(
     )
 
     pytester.runpytest().assert_outcomes(passed=2)
-    info_calls = [call for call in server.calls if call.request.url == f"{URL}api/v1/info"]
-    assert len(info_calls) == 1
+    checks = [
+        call
+        for call in server.calls
+        if (call.request.url or "").startswith(f"{URL}api/v1/messages?")
+        and "limit=1" in (call.request.url or "")
+    ]
+    assert len(checks) == 1
 
 
 # Inboxes
@@ -419,7 +470,7 @@ def test_a_failed_test_can_delete_its_messages(
 def test_kept_messages_near_mailpits_limit_get_a_warning(
     pytester: pytest.Pytester, server: responses.RequestsMock
 ) -> None:
-    server.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": 450})
+    server.replace(responses.GET, f"{URL}api/v1/messages", json=page() | {"total": 450})
     pytester.makepyfile(
         """
         def test_fails(mailpit_inbox): assert False
@@ -456,7 +507,7 @@ def test_kept_messages_near_mailpits_limit_get_a_warning(
 def test_no_limit_warning_unless_kept_messages_are_at_risk(
     pytester: pytest.Pytester, server: responses.RequestsMock, ini: str, tests: str, held: int
 ) -> None:
-    server.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": held})
+    server.replace(responses.GET, f"{URL}api/v1/messages", json=page() | {"total": held})
     pytester.makeini(f"[pytest]\n{ini}\n")
     pytester.makepyfile(tests)
 
@@ -469,10 +520,12 @@ def test_the_limit_check_ignores_mailpit_going_away(
     pytester: pytest.Pytester, server: responses.RequestsMock
 ) -> None:
     answers: Iterator[tuple[int, dict[str, str], str]] = iter(
-        [(200, {}, json.dumps(samples.INFO)), (503, {}, "shutting down")]
+        [(200, {}, json.dumps(page())), (503, {}, "shutting down")]
     )
-    server.remove(responses.GET, f"{URL}api/v1/info")
-    server.add_callback(responses.GET, f"{URL}api/v1/info", callback=lambda request: next(answers))
+    server.remove(responses.GET, f"{URL}api/v1/messages")
+    server.add_callback(
+        responses.GET, f"{URL}api/v1/messages", callback=lambda request: next(answers)
+    )
     pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
 
     result = pytester.runpytest()
@@ -484,7 +537,7 @@ def test_failure_report_survives_mailpit_going_away(pytester: pytest.Pytester) -
     pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
         result = pytester.runpytest()
 
     result.assert_outcomes(failed=1)
@@ -495,7 +548,7 @@ def test_cleanup_failures_are_warnings(pytester: pytest.Pytester) -> None:
     pytester.makepyfile("def test_passes(mailpit_inbox): pass")
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
         mock.add_callback(responses.GET, SEARCH, callback=_one_message_per_address)
         mock.delete(f"{URL}api/v1/messages", status=500, body="disk full")
         result = pytester.runpytest()

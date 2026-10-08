@@ -85,6 +85,12 @@ class MailpitClient:
     # Server
 
     def info(self) -> ServerInfo:
+        """Mailpit's version and mailbox totals.
+
+        Before it answers, Mailpit asks GitHub for its latest release, unless it
+        runs with ``MP_DISABLE_VERSION_CHECK=true``. Where outbound connections
+        hang, that takes up to 10 s, and holds up Mailpit's SMTP server meanwhile.
+        """
         return ServerInfo.from_api(self._http.get_json("api/v1/info"))
 
     def is_ready(self) -> bool:

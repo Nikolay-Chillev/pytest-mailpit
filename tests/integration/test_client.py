@@ -1,5 +1,9 @@
 """The client against a real Mailpit, sending real email over SMTP."""
 
+import re
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import pytest
 
 from pytest_mailpit import MailpitAPIError, MailpitClient, build_query
@@ -131,3 +135,35 @@ def test_unknown_message_is_a_404(client: MailpitClient) -> None:
         client.get_message("this-id-does-not-exist")
 
     assert raised.value.status_code == 404
+
+
+def test_a_redirect_in_front_of_mailpit_deletes_nothing(
+    client: MailpitClient, mailpit_url: str, send_email: SendEmail, recipient: str
+) -> None:
+    send_email(recipient)
+    [message] = arrived(client, recipient)
+
+    class Redirect(BaseHTTPRequestHandler):
+        """A proxy that sends every request to Mailpit with a 301, e.g. from http to https."""
+
+        def redirect(self) -> None:
+            self.send_response(301)
+            self.send_header("Location", mailpit_url + self.path.lstrip("/"))
+            self.end_headers()
+
+        do_GET = do_PUT = do_DELETE = redirect
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    try:
+        behind_proxy = MailpitClient(f"http://127.0.0.1:{proxy.server_address[1]}/")
+        # Following the 301 would have sent DELETE without the IDs: Mailpit deletes everything.
+        with pytest.raises(MailpitAPIError, match=f"it redirects to {re.escape(mailpit_url)};"):
+            behind_proxy.delete_messages([message.id])
+    finally:
+        proxy.shutdown()
+
+    assert [summary.id for summary in client.search_all(build_query(to=recipient))] == [message.id]

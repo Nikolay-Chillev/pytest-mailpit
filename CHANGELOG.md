@@ -6,6 +6,12 @@ in any release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Requests to Mailpit no longer follow redirects. Behind a proxy that redirected, for example from http:// to https://, a 301 made the cleanup after every passing test delete every message in Mailpit, because requests sent the DELETE again without its list of IDs. A 302 turned deletes, tags and Chaos changes into GET requests that did nothing. A redirect is now an error that names the URL to use, and the check at the start of the session catches it before any test runs.
+- The plugin no longer calls `/api/v1/info`. Before it answers, Mailpit asks GitHub for its latest release; where outbound connections hang, that took 10 s, as long as the client's timeout, so every test failed with "Cannot reach Mailpit" although Mailpit was up, and Mailpit's SMTP server waited meanwhile. The check at the start of the session and the 450-message warning use `/api/v1/messages`, and a Mailpit older than 1.22 is recognised by its missing `/api/v1/chaos`. `MailpitClient.info()` still works and says this in its docstring.
+- The container of `mailpit_container` runs with `MP_DISABLE_VERSION_CHECK=true`.
+
 ## [0.4.0] - 2026-10-08
 
 ### Added

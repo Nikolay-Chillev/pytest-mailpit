@@ -51,7 +51,7 @@ def mailpit_with(
         return 200, {"Content-Type": "application/json"}, json.dumps(data)
 
     mock = responses.RequestsMock(assert_all_requests_are_fired=False)
-    mock.get(f"{URL}api/v1/info", json=samples.INFO)
+    mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
     mock.add_callback(responses.GET, SEARCH, callback=search)
     mock.get(RAW, body=SOURCE)
     mock.add_callback(responses.GET, MESSAGE, callback=message)
@@ -188,7 +188,7 @@ def test_mailpit_going_away_leaves_a_note_and_no_attachments(pytester: pytest.Py
     pytester.makepyfile(FAILING_TEST)
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
         result = pytester.runpytest("--alluredir=allure-results")
 
     result.assert_outcomes(failed=1)
