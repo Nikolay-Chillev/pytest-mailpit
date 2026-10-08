@@ -298,7 +298,7 @@ Command line options win over environment variables, which win over ini settings
 | Start Mailpit in a Docker container for the session | `--mailpit-container` | | `mailpit_container` | `false` |
 | The image of that container | | | `mailpit_container_image` | `axllent/mailpit` |
 
-The password is read from the environment only, so it stays out of files under version control. `example.com` is reserved for examples, so nothing ever reaches a real person, and unlike `.test` it passes the email validation of most applications.
+The URL must be the one Mailpit answers on: pytest-mailpit never follows redirects, so behind a proxy that redirects http:// to https://, use the https:// URL. The password is read from the environment only, so it stays out of files under version control. `example.com` is reserved for examples, so nothing ever reaches a real person, and unlike `.test` it passes the email validation of most applications.
 
 ```ini
 [pytest]

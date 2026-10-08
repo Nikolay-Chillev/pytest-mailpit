@@ -74,7 +74,7 @@ def mailpit_api() -> Iterator[responses.RequestsMock]:
         return 200, {"Content-Type": "application/json"}, json.dumps(page(*found))
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=page())
         mock.add_callback(
             responses.GET, re.compile(re.escape(f"{URL}api/v1/search") + ".*"), search
         )
@@ -109,7 +109,11 @@ def test_the_container_serves_the_whole_session(
     result.assert_outcomes(passed=2)
     [container] = FakeContainer.instances
     assert container.image == "axllent/mailpit"
-    assert container.env == {"MP_SMTP_DISABLE_RDNS": "true", "MP_ENABLE_CHAOS": "true"}
+    assert container.env == {
+        "MP_SMTP_DISABLE_RDNS": "true",
+        "MP_ENABLE_CHAOS": "true",
+        "MP_DISABLE_VERSION_CHECK": "true",
+    }
     assert container.started
     assert container.stopped
     result.stdout.fnmatch_lines(
@@ -194,7 +198,7 @@ def test_chaos_in_a_container_per_worker_needs_no_warning(
 def test_a_container_full_of_kept_messages_needs_no_warning(
     pytester: pytest.Pytester, mailpit_api: responses.RequestsMock
 ) -> None:
-    mailpit_api.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": 500})
+    mailpit_api.replace(responses.GET, f"{URL}api/v1/messages", json=page() | {"total": 500})
     pytester.makeini("[pytest]\nmailpit_container = true\n")
     pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
 

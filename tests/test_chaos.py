@@ -66,7 +66,7 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def fake() -> Iterator[FakeChaos]:
     fake = FakeChaos()
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
         mock.add_callback(responses.GET, CHAOS, fake.get)
         mock.add_callback(responses.PUT, CHAOS, fake.put)
         yield fake

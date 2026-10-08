@@ -275,7 +275,6 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[responses.RequestsMock]:
         return 200, {}, json.dumps(page(*found))
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
         mock.add_callback(responses.GET, SEARCH, callback=one_per_address)
         mock.get(MESSAGE, json=samples.MESSAGE | {"ID": "m1"})
         mock.get(f"{URL}api/v1/messages", json=page())

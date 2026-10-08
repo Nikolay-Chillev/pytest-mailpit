@@ -15,7 +15,10 @@ class Transport:
     """Sends requests to paths relative to Mailpit's URL and turns failures into errors.
 
     The URL may include a web root (Mailpit's ``--webroot``), e.g.
-    ``http://localhost:8025/mailpit/``.
+    ``http://localhost:8025/mailpit/``. Redirects are errors, never followed:
+    after a 301, requests would send a DELETE again without its body, and
+    Mailpit deletes every message when ``DELETE /api/v1/messages`` has no IDs;
+    after a 302, it would send a GET, which changes nothing.
     """
 
     def __init__(
@@ -54,7 +57,12 @@ class Transport:
     ) -> requests.Response:
         try:
             response = self.session.request(
-                method, self.url(path), params=params, json=json_body, timeout=self.timeout
+                method,
+                self.url(path),
+                params=params,
+                json=json_body,
+                timeout=self.timeout,
+                allow_redirects=False,
             )
         except requests.RequestException as error:
             # The error text can contain the requested URL, credentials included.
@@ -62,9 +70,10 @@ class Transport:
             raise MailpitConnectionError(
                 f"Cannot reach Mailpit at {self.display_url}: {reason}"
             ) from error
-        if not response.ok:
+        if response.is_redirect or not response.ok:
+            detail = _redirect(response, path) if response.is_redirect else _detail(response)
             raise MailpitAPIError(
-                method, _without_credentials(response.url), response.status_code, _detail(response)
+                method, _without_credentials(response.url), response.status_code, detail
             )
         return response
 
@@ -98,6 +107,19 @@ def _detail(response: requests.Response) -> str:
     if len(text) > MAX_DETAIL_CHARS:
         return f"{text[:MAX_DETAIL_CHARS]}... ({len(text) - MAX_DETAIL_CHARS} more characters)"
     return text
+
+
+def _redirect(response: requests.Response, path: str) -> str:
+    """Where a redirect points, for the error: Mailpit's URL there, if it is Mailpit."""
+    target = urlsplit(urljoin(response.url, response.headers["Location"]))
+    endpoint = path.lstrip("/")
+    if not target.path.endswith(endpoint):  # e.g. a login page
+        url = _without_credentials(urlunsplit(target))
+        return f"it redirects to {url}; pytest-mailpit needs a URL that answers without redirects"
+    # The same endpoint elsewhere, e.g. on https://: Mailpit's URL is the part before it.
+    base = target._replace(path=target.path[: len(target.path) - len(endpoint)], query="")
+    url = _without_credentials(urlunsplit(base))
+    return f"it redirects to {url}; point pytest-mailpit at that URL"
 
 
 def _without_credentials(url: str) -> str:

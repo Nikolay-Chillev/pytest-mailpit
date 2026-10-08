@@ -11,7 +11,6 @@ from requests import PreparedRequest
 
 from pytest_mailpit import MailpitClient
 from pytest_mailpit._reporting import MAX_TAG_LENGTH, failure_tag
-from tests import samples
 from tests.test_waiting import page, summary
 
 URL = "http://localhost:8025/"
@@ -75,7 +74,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[responses.RequestsMock]:
         return 200, {}, json.dumps(page(*found))
 
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
+        mock.get(f"{URL}api/v1/messages", json=page())
         mock.add_callback(responses.GET, SEARCH, callback=one_per_address)
         mock.delete(f"{URL}api/v1/messages", body="ok")
         mock.put(TAGS, body="ok")

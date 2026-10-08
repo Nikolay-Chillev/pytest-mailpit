@@ -21,7 +21,6 @@ from pytest_mailpit._django import (
     keeps_email_in_memory,
     outbox_hint,
 )
-from tests import samples
 from tests.test_waiting import page
 
 URL = "http://localhost:8025/"
@@ -41,7 +40,6 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit without messages."""
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
-        mock.get(f"{URL}api/v1/info", json=samples.INFO)
         mock.get(f"{URL}api/v1/search", json=page())
         mock.get(f"{URL}api/v1/messages", json=page())
         mock.delete(f"{URL}api/v1/messages", body="ok")
