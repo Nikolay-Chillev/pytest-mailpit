@@ -32,6 +32,10 @@ dependencies = [
     "requests>=2.32.4",
 ]
 
+[project.optional-dependencies]
+# mailpit_container: start Mailpit in a Docker container for the session.
+testcontainers = ["testcontainers[mailpit]>=4.8"]
+
 [project.entry-points.pytest11]
 mailpit = "pytest_mailpit.plugin"
 
@@ -50,6 +54,7 @@ dev = [
     "pytest-html>=4.1",
     "pytest-xdist>=3.8",
     "responses>=0.26",
+    "testcontainers[mailpit]>=4.8",
     "ruff>=0.16",
     "types-requests>=2.33",
 ]
@@ -100,5 +105,5 @@ files = ["src", "tests"]
 
 # Optional integrations without type hints.
 [[tool.mypy.overrides]]
-module = ["allure", "allure.*", "pytest_html", "pytest_html.*"]
+module = ["allure", "allure.*", "pytest_html", "pytest_html.*", "testcontainers", "testcontainers.*"]
 ignore_missing_imports = true
