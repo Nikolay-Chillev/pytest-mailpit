@@ -55,6 +55,15 @@ docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit
 
 Point your application's SMTP settings at Mailpit (port 1025 above). pytest-mailpit talks to Mailpit's web UI and API at `http://localhost:8025` unless you [configure](#settings) another URL. The plugin registers itself: there is nothing to add to `conftest.py`.
 
+Or let the plugin start Mailpit in a Docker container for the session, with nothing to run before `pytest`:
+
+```bash
+pip install "pytest-mailpit[testcontainers]"
+pytest --mailpit-container
+```
+
+The `mailpit_smtp` fixture is the host and port where the application under test should send its email, in both cases.
+
 ## Usage
 
 ### The inbox
@@ -227,6 +236,9 @@ Command line options win over environment variables, which win over ini settings
 | Keep a failed test's messages | | | `mailpit_keep_on_failure` | `true` |
 | List and attach a failed test's messages in reports | | | `mailpit_report_messages` | `true` |
 | When Mailpit cannot be reached: `fail` or `skip` | | | `mailpit_unreachable` | `fail` |
+| Mailpit's SMTP server, for `mailpit_smtp` | | `MAILPIT_SMTP` | `mailpit_smtp` | `localhost:1025` |
+| Start Mailpit in a Docker container for the session | `--mailpit-container` | | `mailpit_container` | `false` |
+| The image of that container | | | `mailpit_container_image` | `axllent/mailpit` |
 
 The password is read from the environment only, so it stays out of files under version control. `example.com` is reserved for examples, so nothing ever reaches a real person, and unlike `.test` it passes the email validation of most applications.
 
@@ -301,7 +313,7 @@ jobs:
 ### Recipes
 
 - [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host, and how the two find each other.
-- [Testcontainers](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers): Mailpit started by the test session, so nothing has to run before `pytest`.
+- [Testcontainers](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers): `mailpit_container = true`, and the plugin starts Mailpit for the session; or start your own container and point the plugin at it.
 - [Migrating from MailHog](https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/docs/migrating-from-mailhog.md): the container settings, the API and the message fields, call by call.
 
 Both examples run in CI on every change.

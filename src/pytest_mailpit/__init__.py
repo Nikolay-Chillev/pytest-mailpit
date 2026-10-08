@@ -3,7 +3,7 @@
 from importlib.metadata import version
 
 from pytest_mailpit.client import MailpitClient
-from pytest_mailpit.config import MailpitConfig
+from pytest_mailpit.config import MailpitConfig, SMTPServer
 from pytest_mailpit.errors import (
     MailpitAPIError,
     MailpitAssertionError,
@@ -48,6 +48,7 @@ __all__ = [
     "Message",
     "MessageList",
     "MessageSummary",
+    "SMTPServer",
     "ServerInfo",
     "__version__",
     "build_query",

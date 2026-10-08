@@ -18,20 +18,27 @@ Inbox domain                                                             ``mailp
 Keep failed messages                                                     ``mailpit_keep_on_failure``
 Report failed messages                                                   ``mailpit_report_messages``
 When unreachable                                                         ``mailpit_unreachable``
+SMTP host:port                                 ``MAILPIT_SMTP``          ``mailpit_smtp``
+Start a container      ``--mailpit-container``                           ``mailpit_container``
+Container image                                                          ``mailpit_container_image``
 =====================  ======================  ========================  ==========================
 """
 
+import dataclasses
 import os
 import re
 import warnings
 from collections.abc import Callable, Generator, Iterator, Mapping
+from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
+from pytest_mailpit._container import start_container, testcontainers_installed
 from pytest_mailpit._http import _without_credentials
 from pytest_mailpit._reporting import report_failure
 from pytest_mailpit.client import MailpitClient
-from pytest_mailpit.config import DEFAULT_DOMAIN, MailpitConfig
+from pytest_mailpit.config import DEFAULT_DOMAIN, DEFAULT_IMAGE, MailpitConfig, SMTPServer
 from pytest_mailpit.errors import (
     MailpitAPIError,
     MailpitConnectionError,
@@ -56,6 +63,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="URL",
         help="URL of Mailpit's web UI, with its web root if it has one "
         "(default: http://localhost:8025/).",
+    )
+    group.addoption(
+        "--mailpit-container",
+        dest="mailpit_container",
+        action="store_true",
+        default=None,
+        help="Start Mailpit in a Docker container for the session (needs Testcontainers).",
     )
     group.addoption(
         "--mailpit-timeout",
@@ -87,6 +101,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "List a failed test's messages in its report, and attach them to Allure and pytest-html.",
         type="bool",
         default=True,
+    )
+    parser.addini(
+        "mailpit_smtp",
+        "Host and port of Mailpit's SMTP server, for mailpit_smtp (default: localhost:1025).",
+        default="",
+    )
+    parser.addini(
+        "mailpit_container",
+        "Start Mailpit in a Docker container for the session (needs Testcontainers).",
+        type="bool",
+        default=False,
+    )
+    parser.addini(
+        "mailpit_container_image",
+        f"Docker image of the Mailpit container (default: {DEFAULT_IMAGE}).",
+        default="",
     )
     parser.addini(
         "mailpit_unreachable",
@@ -128,6 +158,11 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         raise pytest.UsageError(
             f"mailpit_domain must be a domain such as example.com, got {domain!r}"
         )
+    container = bool(config.getoption("mailpit_container") or config.getini("mailpit_container"))
+    if container and not testcontainers_installed():
+        raise pytest.UsageError(
+            "mailpit_container needs Testcontainers: pip install 'pytest-mailpit[testcontainers]'"
+        )
     return MailpitConfig(
         url=url,
         username=environ.get("MAILPIT_USERNAME") or None,
@@ -149,11 +184,19 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         keep_on_failure=bool(config.getini("mailpit_keep_on_failure")),
         report_messages=bool(config.getini("mailpit_report_messages")),
         skip_if_unreachable=unreachable == "skip",
+        smtp=_smtp(setting(None, "MAILPIT_SMTP", "mailpit_smtp"), defaults.smtp),
+        container=container,
+        container_image=setting(None, None, "mailpit_container_image") or defaults.container_image,
     )
 
 
 def pytest_report_header(config: pytest.Config) -> str:
-    return f"mailpit: {_without_credentials(config.stash[_CONFIG].url)}"
+    mailpit_config = config.stash[_CONFIG]
+    if mailpit_config.container:
+        return (
+            f"mailpit: a Docker container of {mailpit_config.container_image}, started on first use"
+        )
+    return f"mailpit: {_without_credentials(mailpit_config.url)}"
 
 
 @pytest.hookimpl(wrapper=True)
@@ -182,9 +225,56 @@ def _record(item: pytest.Item, report: pytest.TestReport) -> None:
 
 
 @pytest.fixture(scope="session")
-def mailpit_config(pytestconfig: pytest.Config) -> MailpitConfig:
-    """The settings pytest-mailpit runs with."""
-    return pytestconfig.stash[_CONFIG]
+def mailpit_config(pytestconfig: pytest.Config, request: pytest.FixtureRequest) -> MailpitConfig:
+    """The settings pytest-mailpit runs with.
+
+    With ``mailpit_container``, the URL and SMTP server are the container's.
+    """
+    config = pytestconfig.stash[_CONFIG]
+    if not config.container:
+        return config
+    container = request.getfixturevalue("mailpit_container")
+    return dataclasses.replace(
+        config,
+        url=f"{container.get_base_api_url()}/",
+        smtp=SMTPServer(container.get_container_host_ip(), int(container.get_exposed_smtp_port())),
+    )
+
+
+@pytest.fixture(scope="session")
+def mailpit_container(pytestconfig: pytest.Config) -> Iterator[Any]:
+    """Mailpit in a Docker container for the session, with ``mailpit_container = true``.
+
+    It is Testcontainers' MailpitContainer, started with Chaos enabled and
+    without reverse DNS lookups. Under pytest-xdist every worker gets its own.
+    """
+    config = pytestconfig.stash[_CONFIG]
+    problem = None
+    if not config.container:
+        problem = (
+            "The mailpit_container fixture needs mailpit_container = true, or --mailpit-container."
+        )
+    else:
+        try:
+            container = start_container(config.container_image)
+        except Exception as error:  # Docker not running, image missing, ...
+            problem = (
+                f"Could not start Mailpit in a Docker container ({_root_cause(error)}). "
+                "Is Docker running?"
+            )
+    # Fail outside the except block, so pytest does not print the chain of Docker errors.
+    if problem is not None:
+        pytest.fail(problem, pytrace=False)
+    try:
+        yield container
+    finally:
+        container.stop()
+
+
+@pytest.fixture(scope="session")
+def mailpit_smtp(mailpit_config: MailpitConfig) -> SMTPServer:
+    """Host and port of Mailpit's SMTP server: where the application under test sends email."""
+    return mailpit_config.smtp
 
 
 @pytest.fixture(scope="session")
@@ -314,6 +404,19 @@ def _seconds(name: str, value: str | None, default: float, *, allow_zero: bool) 
     if seconds < 0 or (seconds == 0 and not allow_zero):
         raise pytest.UsageError(f"{name} must be a positive number of seconds, got {value!r}")
     return seconds
+
+
+def _smtp(value: str | None, default: SMTPServer) -> SMTPServer:
+    if value is None:
+        return default
+    try:
+        parts = urlsplit(f"//{value.strip()}")
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        host = port = None
+    if not host or not port:
+        raise pytest.UsageError(f"The Mailpit SMTP server must be host:port, got {value!r}")
+    return SMTPServer(host, port)
 
 
 def _verify(value: str | None, default: bool | str) -> bool | str:

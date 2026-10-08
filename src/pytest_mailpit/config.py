@@ -1,8 +1,25 @@
 """Settings of the pytest plugin."""
 
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from pytest_mailpit.client import DEFAULT_URL, MailpitClient
+
+DEFAULT_IMAGE = "axllent/mailpit"
+
+
+class SMTPServer(NamedTuple):
+    """Where the application under test sends its email: Mailpit's SMTP server."""
+
+    host: str
+    port: int
+
+    def __str__(self) -> str:
+        return f"{self.host}:{self.port}"
+
+
+DEFAULT_SMTP = SMTPServer("localhost", 1025)
+
 
 # Reserved for examples (RFC 2606), so it never reaches a real person, and
 # unlike ".test" it passes the email validation of most applications.
@@ -30,6 +47,11 @@ class MailpitConfig:
     report_messages: bool = True
     # Skip the tests that need Mailpit when it cannot be reached, instead of failing them.
     skip_if_unreachable: bool = False
+    # Mailpit's SMTP server, for the mailpit_smtp fixture.
+    smtp: SMTPServer = DEFAULT_SMTP
+    # Start Mailpit in a Docker container for the session (Testcontainers), from this image.
+    container: bool = False
+    container_image: str = DEFAULT_IMAGE
 
     def client(self) -> MailpitClient:
         return MailpitClient(
