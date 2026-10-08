@@ -6,6 +6,15 @@ in any release.
 
 ## [Unreleased]
 
+### Added
+
+- `mailpit_django`: Django sends the test's email over SMTP to Mailpit instead of keeping it in `django.core.mail.outbox`, so `mailpit_inbox` gets it as the recipient does. It sets `MAILERS` on Django 6.1 and newer, and `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` on older versions.
+- When a wait for a message times out while Django keeps email in memory, the failure says so and suggests `mailpit_django`.
+
+### Documentation
+
+- A Django example, run in CI with Django 5.2 and 6.1.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added

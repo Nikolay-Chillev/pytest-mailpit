@@ -11,9 +11,20 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Nikolay Chillev" }]
-keywords = ["pytest", "mailpit", "email", "email-testing", "smtp", "playwright", "xdist", "testing"]
+keywords = [
+    "pytest",
+    "mailpit",
+    "email",
+    "email-testing",
+    "smtp",
+    "django",
+    "playwright",
+    "xdist",
+    "testing",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Framework :: Django",
     "Framework :: Pytest",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
@@ -49,6 +60,7 @@ Changelog = "https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/CHANGEL
 dev = [
     "allure-pytest>=2.13",
     "coverage>=7.10",
+    "django>=5.2",
     "mypy>=2.4",
     "playwright>=1.55",
     "pytest-html>=4.1",
@@ -105,5 +117,14 @@ files = ["src", "tests"]
 
 # Optional integrations without type hints.
 [[tool.mypy.overrides]]
-module = ["allure", "allure.*", "pytest_html", "pytest_html.*", "testcontainers", "testcontainers.*"]
+module = [
+    "allure",
+    "allure.*",
+    "django",
+    "django.*",
+    "pytest_html",
+    "pytest_html.*",
+    "testcontainers",
+    "testcontainers.*",
+]
 ignore_missing_imports = true

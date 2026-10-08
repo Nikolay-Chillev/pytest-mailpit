@@ -204,6 +204,26 @@ def test_invitation(app_client, mailpit_inbox, mailpit_inbox_factory):
     mailpit_inbox.assert_no_message()
 ```
 
+### Django
+
+Django's test runner, and pytest-django, keep sent email in memory (`django.core.mail.outbox`). `mailpit_django` sends the test's email over SMTP to Mailpit instead, so the test gets it as the recipient does, with the link and HTML checks and the browser helpers:
+
+```python
+import pytest
+
+
+@pytest.mark.usefixtures("mailpit_django")
+def test_sign_up(client, mailpit_inbox):
+    client.post("/sign-up/", {"email": mailpit_inbox.address})
+
+    message = mailpit_inbox.wait_for_message(subject="Confirm your email")
+    response = client.get(message.link(text="Confirm your email"))
+
+    assert response.status_code == 200
+```
+
+It points every mailer in `MAILERS` at Mailpit on Django 6.1 and newer, and `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` on older versions, for one test. A test that waits for an email Django kept in memory fails with a hint to use it. Email that a Celery worker or a container sends reaches Mailpit through that process's own settings, without `mailpit_django`. The [Django example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django) runs in CI with Django 5.2 and 6.1.
+
 ### When sending fails
 
 Mailpit's [Chaos](https://mailpit.axllent.org/docs/integration/chaos/) makes its SMTP server reject messages on purpose, so a test can check what the application does when email cannot be sent: show an error, retry, or queue the message. `mailpit_chaos` sets the errors for one test and restores what Mailpit had before:
@@ -336,22 +356,24 @@ jobs:
 ### Recipes
 
 - [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host, and how the two find each other.
+- [Django](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django): a sign-up email with a confirmation link, read from Mailpit with `mailpit_django` and followed with Django's test client.
 - [Testcontainers](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers): `mailpit_container = true`, and the plugin starts Mailpit for the session; or start your own container and point the plugin at it.
 - [Migrating from MailHog](https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/docs/migrating-from-mailhog.md): the container settings, the API and the message fields, call by call.
 
-Both examples run in CI on every change.
+The examples run in CI on every change.
 
 ## Is this the right tool?
 
 | Your test | Use |
 |---|---|
-| The code under test sends email from the test process | Your framework's outbox, e.g. pytest-django's `mailoutbox` |
+| The code under test sends email from the test process, and what it passed to the mailer is enough | Your framework's outbox, e.g. pytest-django's `mailoutbox` |
+| The same, but you want the email as the recipient gets it: the HTML in a browser, link and HTML checks | **pytest-mailpit** with `mailpit_django` |
 | The email leaves the test process: background workers, Docker, a backend in another language, staging, end-to-end tests with Playwright | **Mailpit + pytest-mailpit** |
 | You need real external inboxes or deliverability tests | A hosted service such as Mailosaur or Mailtrap |
 
 ## Compatibility
 
-Python 3.11–3.14 and pytest 8.4 or newer, on Linux, macOS and Windows. Mailpit 1.22 or newer: CI runs against v1.22.3 and the latest release.
+Python 3.11–3.14 and pytest 8.4 or newer, on Linux, macOS and Windows. Mailpit 1.22 or newer: CI runs against v1.22.3 and the latest release. `mailpit_django` works with Django 5.2 and newer.
 
 ## Contributing
 

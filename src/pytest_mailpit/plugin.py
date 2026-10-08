@@ -35,6 +35,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from pytest_mailpit._container import start_container, testcontainers_installed
+from pytest_mailpit._django import email_settings
 from pytest_mailpit._http import _without_credentials
 from pytest_mailpit._reporting import report_failure
 from pytest_mailpit.chaos import Chaos
@@ -344,6 +345,29 @@ def mailpit_inbox_factory(
 def mailpit_inbox(mailpit_inbox_factory: Callable[[], Inbox]) -> Inbox:
     """A unique email address for this test, and the messages sent to it."""
     return mailpit_inbox_factory()
+
+
+@pytest.fixture
+def mailpit_django(mailpit: MailpitClient, mailpit_smtp: SMTPServer) -> Iterator[None]:
+    """Django sends the test's email over SMTP to Mailpit, instead of keeping it in memory.
+
+    Django's test runner, and pytest-django, put sent email in
+    ``django.core.mail.outbox``. With this fixture it reaches Mailpit as a
+    recipient would get it, for mailpit_inbox and the checks on messages.
+    """
+    try:
+        import django
+        from django.conf import settings
+        from django.test.utils import override_settings
+    except ImportError:
+        missing = True
+    else:
+        missing = False
+    if missing:
+        pytest.fail("mailpit_django needs Django: pip install django", pytrace=False)
+    mailers = getattr(settings, "MAILERS", None)
+    with override_settings(**email_settings(django.VERSION, mailers, mailpit_smtp)):
+        yield
 
 
 @pytest.fixture

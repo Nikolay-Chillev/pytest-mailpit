@@ -120,11 +120,41 @@ jobs:
       - name: Test the Testcontainers example
         run: python -m pytest examples/testcontainers
 
+  # The Django example, on the oldest supported Django and the newest.
+  django:
+    name: Django ${{ matrix.django }} example
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        django: ["5.2", "6.1"]
+    services:
+      mailpit:
+        image: axllent/mailpit
+        ports:
+          - 8025:8025
+          - 1025:1025
+        env:
+          MP_SMTP_DISABLE_RDNS: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . pytest-django "django~=${{ matrix.django }}.0"
+      - name: Wait for Mailpit
+        run: curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8025/api/v1/info
+      - name: Test the Django example
+        working-directory: examples/django
+        run: python -m pytest
+
   # The single check to require on main: fails if any job failed or was cancelled.
   ci-passed:
     name: CI passed
     if: ${{ always() }}
-    needs: [lint, test, integration, examples]
+    needs: [lint, test, integration, examples, django]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
