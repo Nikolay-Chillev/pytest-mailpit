@@ -78,6 +78,7 @@ ATTACHMENT = Attachment(
         ("delete_search", ("tag:x",), {}, ("delete_search", ("tag:x",), {})),
         ("delete_all", (), {}, ("delete_all", (), {})),
         ("mark_read", (("a",),), {"read": False}, ("mark_read", (["a"],), {"read": False})),
+        ("set_tags", (iter(["a"]), ("x",)), {}, ("set_tags", (["a"], ["x"]), {})),
         ("chaos", (), {}, ("chaos", (), {})),
         ("set_chaos", (ChaosTriggers(),), {}, ("set_chaos", (ChaosTriggers(),), {})),
     ],
@@ -93,7 +94,13 @@ def test_every_request_runs_in_a_worker_thread(
 
     result = asyncio.run(getattr(client, method)(*args, **kwargs))
 
-    returns_nothing = method in {"delete_messages", "delete_search", "delete_all", "mark_read"}
+    returns_nothing = method in {
+        "delete_messages",
+        "delete_search",
+        "delete_all",
+        "mark_read",
+        "set_tags",
+    }
     assert result == (None if returns_nothing else f"{called[0]} result")
     assert recorder.calls == [(*called, True)]
 
@@ -105,6 +112,7 @@ def test_the_client_from_a_url() -> None:
     assert repr(client) == "AsyncMailpitClient('http://mailpit.test:8025/')"
     assert client.view_url("m1") == "http://mailpit.test:8025/view/m1"
     assert client.html_url("m1") == "http://mailpit.test:8025/view/m1.html"
+    assert client.search_url("tag:x") == "http://mailpit.test:8025/search?q=tag%3Ax"
     assert AsyncMailpitClient().url == URL
 
 

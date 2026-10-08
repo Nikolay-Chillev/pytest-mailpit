@@ -276,7 +276,7 @@ with MailpitClient("http://localhost:8025/") as mailpit:
     source = mailpit.get_raw(message.id)  # the .eml
 ```
 
-It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, waiting and Chaos (`chaos()`, `set_chaos()`). An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message.
+It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, tags (`set_tags()`), waiting and Chaos (`chaos()`, `set_chaos()`). `search_url()` and `view_url()` link to Mailpit's web UI. An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message.
 
 ### Settings
 
@@ -291,6 +291,7 @@ Command line options win over environment variables, which win over ini settings
 | How often to check, in seconds | | | `mailpit_poll_interval` | `0.5` |
 | Domain of the inbox addresses | | | `mailpit_domain` | `example.com` |
 | Keep a failed test's messages | | | `mailpit_keep_on_failure` | `true` |
+| Tag them with the test's name | | | `mailpit_tag_failures` | `true` |
 | List and attach a failed test's messages in reports | | | `mailpit_report_messages` | `true` |
 | When Mailpit cannot be reached: `fail` or `skip` | | | `mailpit_unreachable` | `fail` |
 | Mailpit's SMTP server, for `mailpit_smtp` | | `MAILPIT_SMTP` | `mailpit_smtp` | `localhost:1025` |
@@ -326,7 +327,10 @@ Messages to pytest-3f9a2c-7b1e4d9a@example.com (1):
   Received (UTC)  To                                  Subject
   09:14:03        pytest-3f9a2c-7b1e4d9a@example.com  Welcome to the shop
 Mailpit: http://localhost:8025/
+Tagged 'failed test_sign_up': http://localhost:8025/search?q=tag%3A%22failed%20test_sign_up%22
 ```
+
+The kept messages are tagged with the test's name, such as `failed test_sign_up`, and the link opens them in Mailpit's web UI; tags the application gave them stay. Set `mailpit_tag_failures = false` to leave the tags alone.
 
 With [Allure](https://allurereport.org/docs/pytest/) (`--alluredir`) or [pytest-html](https://pytest-html.readthedocs.io/) (`--html`), the emails themselves are attached too, so a CI report keeps them after Mailpit is gone:
 

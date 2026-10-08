@@ -176,7 +176,8 @@ def test_reporting_messages_can_be_turned_off(pytester: pytest.Pytester) -> None
 
     with mailpit_with() as mock:
         result = pytester.runpytest("--alluredir=allure-results")
-        assert requested(mock, SEARCH) == 0
+        # The messages are listed to tag them, but never fetched.
+        assert requested(mock, MESSAGE) == requested(mock, RAW) == 0
 
     result.assert_outcomes(failed=1)
     assert "Mailpit messages to" not in result.stdout.str()
