@@ -1,0 +1,33 @@
+# Mailpit next to the application; the tests run on the host.
+#
+#   docker compose up -d --build --wait
+#   pytest tests
+#   docker compose down
+
+services:
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "8025:8025" # web UI and API, which pytest-mailpit uses
+      - "1025:1025" # SMTP, for anything on the host that sends email
+    environment:
+      # Reverse DNS lookups of SMTP clients can delay every message by seconds in containers.
+      MP_SMTP_DISABLE_RDNS: "true"
+
+  app:
+    build: ./app
+    ports:
+      - "8000:8000"
+    environment:
+      # Inside the compose network, Mailpit is reached by its service name.
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      PUBLIC_URL: http://localhost:8000
+    depends_on:
+      mailpit:
+        # The Mailpit image has a health check: start sending only once it is ready.
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      retries: 15
