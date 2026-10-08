@@ -191,6 +191,16 @@ def test_chaos_in_a_container_per_worker_needs_no_warning(
     pytester.runpytest().assert_outcomes(passed=1, warnings=0)
 
 
+def test_a_container_full_of_kept_messages_needs_no_warning(
+    pytester: pytest.Pytester, mailpit_api: responses.RequestsMock
+) -> None:
+    mailpit_api.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": 500})
+    pytester.makeini("[pytest]\nmailpit_container = true\n")
+    pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
+
+    pytester.runpytest().assert_outcomes(failed=1, warnings=0)
+
+
 def test_the_container_fixture_needs_the_setting(pytester: pytest.Pytester) -> None:
     pytester.makepyfile("def test_container(mailpit_container): pass")
 
