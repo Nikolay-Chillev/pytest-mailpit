@@ -4,12 +4,15 @@ on:
   pull_request:
   push:
     branches: [main]
+  # publish.yml runs the whole CI on the tagged commit before it builds.
+  workflow_call:
   workflow_dispatch:
 
-# A newer push to the same branch makes the running workflow obsolete.
+# A newer push to the same branch makes the running workflow obsolete; on main,
+# every commit keeps its result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -29,6 +32,10 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
+      # The distributions as publish.yml builds them, checked on every change, not first at a tag.
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
 
   test:
     name: Tests (Python ${{ matrix.python }}, ${{ matrix.os }})
