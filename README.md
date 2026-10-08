@@ -86,14 +86,14 @@ def test_sign_up_sends_a_confirmation_code(app_client, mailpit_inbox):
 A `Message` has the parsed email: `subject`, `sender`, `to`, `cc`, `bcc`, `reply_to`, `date`, `text`, `html`, `attachments`, `inline`, `tags`, `list_unsubscribe` and more.
 
 ```python
-message.links()                       # every http(s) link, from the HTML and the text part
-message.links("/orders/")             # links whose URL contains "/orders/"
-message.link(text="Reset password")   # the one link with this visible text
+message.links()  # every http(s) link, from the HTML and the text part
+message.links("/orders/")  # links whose URL contains "/orders/"
+message.link(text="Reset password")  # the one link with this visible text
 message.link(pattern=r"/reset/\w+$")  # the one link matching a regular expression
 
-message.codes()                       # one-time codes, the most likely first
-message.code()                        # the one code
-message.code(r"[A-Z]{2}-\d{4}")       # a code in your own format
+message.codes()  # one-time codes, the most likely first
+message.code()  # the one code
+message.code(r"[A-Z]{2}-\d{4}")  # a code in your own format
 ```
 
 `link()` and `code()` fail the test unless exactly one candidate is found, and list what the message does contain. Codes are 4–8 digits (or `123 456`) near words such as "code", "OTP" or "verification"; Bulgarian ("код") is understood too.
