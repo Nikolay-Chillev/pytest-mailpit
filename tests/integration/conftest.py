@@ -1,6 +1,5 @@
 import os
 import smtplib
-import time
 import uuid
 from collections.abc import Callable, Iterator
 from email.message import EmailMessage
@@ -8,7 +7,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from pytest_mailpit import MailpitClient, MessageSummary
+from pytest_mailpit import MailpitClient, MessageSummary, build_query
 
 
 @pytest.fixture(scope="session")
@@ -50,6 +49,7 @@ def send_email(smtp_address: tuple[str, int]) -> SendEmail:
         text: str = "Hello from the pytest-mailpit test suite.",
         html: str | None = None,
         cc: str | None = None,
+        bcc: str | None = None,
         attachment: tuple[str, bytes] | None = None,
     ) -> EmailMessage:
         message = EmailMessage()
@@ -57,6 +57,9 @@ def send_email(smtp_address: tuple[str, int]) -> SendEmail:
         message["To"] = to
         if cc:
             message["Cc"] = cc
+        if bcc:
+            # smtplib sends Bcc recipients in the envelope and drops the header.
+            message["Bcc"] = bcc
         message["Subject"] = subject
         message.set_content(text)
         if html:
@@ -73,14 +76,10 @@ def send_email(smtp_address: tuple[str, int]) -> SendEmail:
     return send
 
 
-def wait_for_search(
-    client: MailpitClient, query: str, *, count: int = 1, timeout: float = 10
-) -> list[MessageSummary]:
-    """Poll until ``query`` finds ``count`` messages. A stand-in until the client can wait."""
-    deadline = time.monotonic() + timeout
-    while True:
-        found = client.search_all(query)
-        if len(found) >= count or time.monotonic() >= deadline:
-            assert len(found) == count, f"expected {count} messages for {query}, found {len(found)}"
-            return found
-        time.sleep(0.2)
+def arrived(client: MailpitClient, recipient: str, *, count: int = 1) -> list[MessageSummary]:
+    """Wait for ``count`` messages to ``recipient`` and return their summaries, newest first.
+
+    Waiting fetches the messages, so Mailpit has marked them as read.
+    """
+    client.wait_for_messages(count, recipient=recipient)
+    return client.search_all(build_query(to=recipient))

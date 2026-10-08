@@ -12,6 +12,7 @@ matters.
 
 # Keyword argument of build_query() to Mailpit's filter name.
 _FILTERS = {
+    "addressed": "addressed",
     "to": "to",
     "sender": "from",
     "cc": "cc",
@@ -34,6 +35,7 @@ def quote(value: str) -> str:
 
 def build_query(
     *text: str,
+    addressed: str | None = None,
     to: str | None = None,
     sender: str | None = None,
     cc: str | None = None,
@@ -46,7 +48,7 @@ def build_query(
     """Build a query that matches messages meeting every given criterion.
 
     ``text`` terms are searched in the whole message. ``sender`` filters on the
-    From header.
+    From header. ``addressed`` matches any of From, To, Cc, Bcc and Reply-To.
     """
     terms = []
     for term in text:
@@ -54,6 +56,7 @@ def build_query(
             raise ValueError(f"A text term starting with - or ! would negate the search: {term!r}")
         terms.append(quote(term))
     criteria = {
+        "addressed": addressed,
         "to": to,
         "sender": sender,
         "cc": cc,
