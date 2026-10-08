@@ -204,6 +204,24 @@ def test_invitation(app_client, mailpit_inbox, mailpit_inbox_factory):
     mailpit_inbox.assert_no_message()
 ```
 
+### When sending fails
+
+Mailpit's [Chaos](https://mailpit.axllent.org/docs/integration/chaos/) makes its SMTP server reject messages on purpose, so a test can check what the application does when email cannot be sent: show an error, retry, or queue the message. `mailpit_chaos` sets the errors for one test and restores what Mailpit had before:
+
+```python
+def test_sign_up_while_email_is_down(app_client, mailpit_chaos, mailpit_inbox):
+    mailpit_chaos.reject_recipients(451)  # "try again later"
+
+    response = app_client.post("/sign-up", data={"email": mailpit_inbox.address})
+
+    assert "We could not send the confirmation email" in response.text
+    mailpit_inbox.assert_no_message()
+```
+
+`reject_senders()` fails `MAIL FROM`, `reject_recipients()` fails `RCPT TO` and `reject_authentication()` fails `AUTH`. Each takes the SMTP error code, from 400 to 599, and a `probability` in percent, 100 by default; a lower one makes delivery flaky. `reset()` turns every error off, for example to check that the application sends the email when it retries.
+
+Mailpit must run with Chaos enabled, `MP_ENABLE_CHAOS=true`; the container of `mailpit_container` has it. The errors apply to every message Mailpit receives, so pytest-xdist workers sharing one Mailpit would get each other's errors: give each worker its own with `mailpit_container = true`, or run the Chaos tests without `-n`.
+
 ### The client
 
 The `mailpit` fixture is a `MailpitClient` for the configured server, shared by the whole session. It also works on its own, outside pytest:
@@ -219,7 +237,7 @@ with MailpitClient("http://localhost:8025/") as mailpit:
     source = mailpit.get_raw(message.id)  # the .eml
 ```
 
-It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status and waiting. An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message.
+It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, waiting and Chaos (`chaos()`, `set_chaos()`). An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message.
 
 ### Settings
 
@@ -257,7 +275,7 @@ def test_monthly_report(mailpit_inbox): ...
 
 ### Parallel tests
 
-With pytest-xdist, `pytest -n auto` needs nothing extra. Every address includes the worker (`pytest-gw3-...`), waiting matches it exactly, and cleanup deletes only that test's messages, so workers sharing one Mailpit never interfere.
+With pytest-xdist, `pytest -n auto` needs nothing extra. Every address includes the worker (`pytest-gw3-...`), waiting matches it exactly, and cleanup deletes only that test's messages, so workers sharing one Mailpit never interfere. The exception is [`mailpit_chaos`](#when-sending-fails), whose errors reach every worker.
 
 ### When a test fails
 
@@ -300,6 +318,9 @@ jobs:
         ports:
           - 8025:8025
           - 1025:1025
+        env:
+          MP_SMTP_DISABLE_RDNS: "true"  # no reverse DNS lookups, which delay messages
+          MP_ENABLE_CHAOS: "true"  # for mailpit_chaos
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

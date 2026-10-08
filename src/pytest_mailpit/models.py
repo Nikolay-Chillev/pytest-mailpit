@@ -677,5 +677,68 @@ class ServerInfo:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ChaosTrigger:
+    """An SMTP error that Mailpit's Chaos returns on purpose, and how often."""
+
+    # The SMTP reply code, from 400 to 599.
+    error_code: int
+    # The chance of the error for each SMTP command, in percent: 0 is never, 100 always.
+    probability: int = 0
+
+    @property
+    def active(self) -> bool:
+        return self.probability > 0
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any] | None, *, default_code: int) -> Self:
+        data = data or {}
+        return cls(
+            error_code=data.get("ErrorCode") or default_code,
+            probability=data.get("Probability") or 0,
+        )
+
+    def to_api(self) -> dict[str, int]:
+        return {"ErrorCode": self.error_code, "Probability": self.probability}
+
+
+# Mailpit's error codes when a trigger has none: 451 "try again later", 535 "authentication failed".
+_NO_SENDER_ERRORS = ChaosTrigger(451)
+_NO_RECIPIENT_ERRORS = ChaosTrigger(451)
+_NO_AUTHENTICATION_ERRORS = ChaosTrigger(535)
+
+
+@dataclass(frozen=True, slots=True)
+class ChaosTriggers:
+    """``/api/v1/chaos``: the SMTP errors Mailpit returns on purpose.
+
+    ``sender`` fails ``MAIL FROM``, ``recipient`` fails ``RCPT TO`` and
+    ``authentication`` fails ``AUTH``. ``ChaosTriggers()`` has every error off.
+    """
+
+    sender: ChaosTrigger = _NO_SENDER_ERRORS
+    recipient: ChaosTrigger = _NO_RECIPIENT_ERRORS
+    authentication: ChaosTrigger = _NO_AUTHENTICATION_ERRORS
+
+    @property
+    def active(self) -> bool:
+        return self.sender.active or self.recipient.active or self.authentication.active
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any]) -> Self:
+        return cls(
+            sender=ChaosTrigger.from_api(data.get("Sender"), default_code=451),
+            recipient=ChaosTrigger.from_api(data.get("Recipient"), default_code=451),
+            authentication=ChaosTrigger.from_api(data.get("Authentication"), default_code=535),
+        )
+
+    def to_api(self) -> dict[str, dict[str, int]]:
+        return {
+            "Sender": self.sender.to_api(),
+            "Recipient": self.recipient.to_api(),
+            "Authentication": self.authentication.to_api(),
+        }
+
+
 def _addresses(data: Any) -> tuple[Address, ...]:
     return tuple(Address.from_api(item) for item in data or ())

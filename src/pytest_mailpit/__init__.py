@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 
+from pytest_mailpit.chaos import Chaos
 from pytest_mailpit.client import MailpitClient
 from pytest_mailpit.config import MailpitConfig, SMTPServer
 from pytest_mailpit.errors import (
@@ -15,6 +16,8 @@ from pytest_mailpit.inbox import Inbox
 from pytest_mailpit.models import (
     Address,
     Attachment,
+    ChaosTrigger,
+    ChaosTriggers,
     HTMLCheck,
     HTMLWarning,
     LinkCheck,
@@ -32,6 +35,9 @@ __version__ = version("pytest-mailpit")
 __all__ = [
     "Address",
     "Attachment",
+    "Chaos",
+    "ChaosTrigger",
+    "ChaosTriggers",
     "HTMLCheck",
     "HTMLWarning",
     "Inbox",
