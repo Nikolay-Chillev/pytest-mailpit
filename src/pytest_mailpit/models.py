@@ -5,6 +5,7 @@ Mailpit versions added have defaults and unknown fields are ignored, so the
 models parse responses from every supported server version.
 """
 
+import fnmatch
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -39,11 +40,13 @@ class Attachment:
     content_type: str
     size: int
     content_id: str = ""
-    # Checksum name ("MD5", "SHA1", "SHA256") to hex digest.
+    # Checksum name ("MD5", "SHA1", "SHA256") to hex digest; Mailpit 1.29+ only.
     checksums: Mapping[str, str] = field(default_factory=dict, hash=False)
+    # The message the attachment belongs to, for MailpitClient.get_attachment().
+    message_id: str = ""
 
     @classmethod
-    def from_api(cls, data: Mapping[str, Any]) -> Self:
+    def from_api(cls, data: Mapping[str, Any], *, message_id: str = "") -> Self:
         return cls(
             part_id=data.get("PartID") or "",
             file_name=data.get("FileName") or "",
@@ -51,7 +54,11 @@ class Attachment:
             size=data.get("Size") or 0,
             content_id=data.get("ContentID") or "",
             checksums=dict(data.get("Checksums") or {}),
+            message_id=message_id,
         )
+
+    def __str__(self) -> str:
+        return f"{self.file_name or '(no name)'} ({self.content_type}, {_size(self.size)})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +81,21 @@ class ListUnsubscribe:
             links=tuple(data.get("Links") or ()),
             errors=data.get("Errors") or "",
         )
+
+    @property
+    def http_link(self) -> str | None:
+        """The HTTP(S) unsubscribe link, if the header has one."""
+        return next((link for link in self.links if _is_http(link)), None)
+
+    @property
+    def mailto_link(self) -> str | None:
+        """The mailto: unsubscribe link, if the header has one."""
+        return next((link for link in self.links if link.lower().startswith("mailto:")), None)
+
+    @property
+    def one_click(self) -> bool:
+        """Whether List-Unsubscribe-Post asks for one-click unsubscription (RFC 8058)."""
+        return self.header_post.strip().lower() == "list-unsubscribe=one-click"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +185,14 @@ class Message:
             text=data.get("Text") or "",
             html=data.get("HTML") or "",
             size=data.get("Size") or 0,
-            attachments=tuple(Attachment.from_api(item) for item in data.get("Attachments") or ()),
-            inline=tuple(Attachment.from_api(item) for item in data.get("Inline") or ()),
+            attachments=tuple(
+                Attachment.from_api(item, message_id=data["ID"])
+                for item in data.get("Attachments") or ()
+            ),
+            inline=tuple(
+                Attachment.from_api(item, message_id=data["ID"])
+                for item in data.get("Inline") or ()
+            ),
             list_unsubscribe=ListUnsubscribe.from_api(data.get("ListUnsubscribe")),
             username=data.get("Username") or "",
         )
@@ -242,6 +270,79 @@ class Message:
             lines.append(f"Text of the message: {body!r}")
         raise MailpitAssertionError("\n".join(lines))
 
+    def attachment(
+        self,
+        name: str | None = None,
+        *,
+        content_type: str | None = None,
+        include_inline: bool = False,
+    ) -> Attachment:
+        """The one attachment with this file name and content type.
+
+        Both may contain shell-style wildcards (``"invoice-*.pdf"``, ``"image/*"``)
+        and match case-insensitively. Inline parts such as embedded images count
+        only with ``include_inline``. Raises MailpitAssertionError, a test
+        failure, unless exactly one matches. Get the content with
+        :meth:`MailpitClient.get_attachment`.
+        """
+        __tracebackhide__ = True
+        candidates = [*self.attachments, *(self.inline if include_inline else ())]
+        found = [
+            attachment
+            for attachment in candidates
+            if (name is None or _matches(attachment.file_name, name))
+            and (
+                content_type is None or _matches(_base_type(attachment.content_type), content_type)
+            )
+        ]
+        if len(found) == 1:
+            return found[0]
+        wanted = []
+        if name is not None:
+            wanted.append(f"named {name!r}")
+        if content_type is not None:
+            wanted.append(f"of type {content_type!r}")
+        filters = f" {' and '.join(wanted)}" if wanted else ""
+        lines = [f"Expected one attachment{filters} in {self._describe()}, found {len(found)}."]
+        if candidates:
+            lines.append("Attachments in the message:")
+            lines += [f"  {attachment}" for attachment in candidates]
+        else:
+            lines.append("The message has no attachments.")
+            if self.inline and not include_inline:
+                lines.append(f"It has {len(self.inline)} inline part(s): pass include_inline=True.")
+        raise MailpitAssertionError("\n".join(lines))
+
+    def unsubscribe_link(self, *, one_click: bool = False) -> str:
+        """The HTTP(S) link of the List-Unsubscribe header.
+
+        Raises MailpitAssertionError, a test failure, if the header is missing,
+        Mailpit found problems in it, or it has no HTTP(S) link. With
+        ``one_click``, the link must also be HTTPS and List-Unsubscribe-Post
+        must ask for one-click unsubscription (RFC 8058), as Gmail and Yahoo
+        require from bulk senders.
+        """
+        __tracebackhide__ = True
+        unsubscribe = self.list_unsubscribe
+        problem = None
+        if not unsubscribe.header:
+            problem = "has no List-Unsubscribe header"
+        elif unsubscribe.errors:
+            problem = f"has an invalid List-Unsubscribe header: {unsubscribe.errors}"
+        elif unsubscribe.http_link is None:
+            problem = f"has no HTTP(S) link in List-Unsubscribe: {unsubscribe.header}"
+        elif one_click and not unsubscribe.http_link.lower().startswith("https://"):
+            problem = f"has a one-click unsubscribe link that is not HTTPS: {unsubscribe.http_link}"
+        elif one_click and not unsubscribe.one_click:
+            post = unsubscribe.header_post or "missing"
+            problem = (
+                "does not offer one-click unsubscription: List-Unsubscribe-Post should be "
+                f"'List-Unsubscribe=One-Click', got {post!r}"
+            )
+        if problem is None and unsubscribe.http_link is not None:
+            return unsubscribe.http_link
+        raise MailpitAssertionError(f"The {self._describe()} {problem}.")
+
     def _links(self) -> list[Link]:
         return find_links(self.text, self.html)
 
@@ -262,6 +363,27 @@ def _describe_filters(
     if text is not None:
         parts.append(f"with text {text!r}")
     return f" {' and '.join(parts)}" if parts else ""
+
+
+def _matches(value: str, pattern: str) -> bool:
+    return fnmatch.fnmatchcase(value.casefold(), pattern.casefold())
+
+
+def _base_type(content_type: str) -> str:
+    """ "text/plain; charset=utf-8" -> "text/plain" """
+    return content_type.split(";", 1)[0].strip()
+
+
+def _is_http(link: str) -> bool:
+    return link.lower().startswith(("http://", "https://"))
+
+
+def _size(size: int) -> str:
+    if size < 1000:
+        return f"{size} B"
+    if size < 1_000_000:
+        return f"{size / 1000:.1f} kB"
+    return f"{size / 1_000_000:.1f} MB"
 
 
 def _describe_link(link: Link) -> str:

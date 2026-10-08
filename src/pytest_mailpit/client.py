@@ -12,7 +12,7 @@ from urllib.parse import urljoin
 from pytest_mailpit._http import Transport
 from pytest_mailpit._report import message_table
 from pytest_mailpit.errors import MailpitAssertionError, MailpitError
-from pytest_mailpit.models import Message, MessageList, MessageSummary, ServerInfo
+from pytest_mailpit.models import Attachment, Message, MessageList, MessageSummary, ServerInfo
 from pytest_mailpit.search import build_query
 
 DEFAULT_URL = "http://localhost:8025/"
@@ -154,6 +154,15 @@ class MailpitClient:
     def get_part(self, message_id: str, part_id: str) -> bytes:
         """The content of an attachment or inline part, by its ``part_id``."""
         return self._http.request("GET", f"api/v1/message/{message_id}/part/{part_id}").content
+
+    def get_attachment(self, attachment: Attachment) -> bytes:
+        """The content of an attachment or inline part of a message this client fetched."""
+        if not attachment.message_id:
+            raise ValueError(
+                "The attachment does not say which message it belongs to; "
+                "use get_part(message_id, part_id)"
+            )
+        return self.get_part(attachment.message_id, attachment.part_id)
 
     def view_url(self, message_id: str) -> str:
         """The page of the message in Mailpit's web UI, without credentials."""
