@@ -206,7 +206,7 @@ def test_html_to_text_skips_head_scripts_and_styles() -> None:
         "<body><p>Hello</p><script>var x=1</script><p>world</p></body></html>"
     )
 
-    assert html_to_text(html) == "Hello world"
+    assert html_to_text(html) == "Hello\nworld"
 
 
 def test_code_with_a_pattern_does_not_suggest_one_when_ambiguous() -> None:
@@ -214,3 +214,133 @@ def test_code_with_a_pattern_does_not_suggest_one_when_ambiguous() -> None:
         message(text="A-1 and A-2").code(r"A-\d")
 
     assert str(raised.value).endswith("found 2: A-1, A-2.")
+
+
+# Real emails: what the heuristics see besides the code
+
+OTP_TEXT = """Hi Ivan,
+
+Your verification code is: 482913
+
+This code will expire in 10 minutes. If you did not request this code, ignore this email.
+
+(c) 2026 Acme Ltd. · 1 Main St, Springfield, IL 62704 · (800) 555-0199
+"""
+
+OTP_HTML = """<!doctype html><html><head><title>Your code</title>
+<style>.code{font-size:32px}</style></head><body><table><tr><td>
+<h1>Confirm your email</h1><p>Your verification code</p><p class="code">482913</p>
+<p>15 minutes until it expires. If you didn't request this code, ignore this email.</p>
+</td></tr><tr><td>&copy; 2026 Acme Ltd. &middot; 15 Vitosha Blvd, 1000 Sofia</td></tr>
+</table></body></html>"""
+
+
+@pytest.mark.parametrize(
+    ("text", "html"), [(OTP_TEXT, OTP_HTML), ("", OTP_HTML)], ids=["text part", "HTML only"]
+)
+def test_a_real_otp_email_has_one_code(text: str, html: str) -> None:
+    assert message(text=text, html=html).code() == "482913"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Your code 482913 expires in 1440 minutes.",
+        "Your code: 482913. Total: $1299, or 1500 лв.",
+        "Reference: 77812345. Your verification code: 482913.",
+        "Order #10023: your code is 482913",
+        "Your code is 482913, sent on October 7, 2026.",
+        "Кодът ви е 482913, изпратен на 7 октомври 2026 г.",
+        "Your code is 482913. Questions? Call (800) 555-0199.",
+    ],
+)
+def test_numbers_next_to_the_code_that_are_not_codes(text: str) -> None:
+    assert message(text=text).codes() == ["482913"]
+
+
+def test_a_year_is_a_code_when_there_is_nothing_else() -> None:
+    assert message(text="Your PIN is 2026").codes() == ["2026"]
+
+
+def test_codes_in_the_html_when_the_text_part_has_none() -> None:
+    email = message(
+        text="This email needs an HTML client.",
+        html="<p>Your code:</p><p>482913</p>",
+    )
+
+    assert email.code() == "482913"
+
+
+def test_html_after_an_unclosed_head_is_read() -> None:
+    html = "<html><head><title>Code</title><body><p>Your code is 4829</p></body></html>"
+
+    assert message(html=html).codes() == ["4829"]
+
+
+def test_a_pattern_group_that_takes_no_part_is_skipped() -> None:
+    email = message(text="Code: 4829. Backup: none")
+
+    assert email.codes(r"Code: (\d+)|Backup: (\w+)") == ["4829"]
+
+
+# Real emails: links
+
+
+def test_a_url_keeps_every_text_it_has() -> None:
+    # A logo, then a button to the same page.
+    email = message(
+        html='<a href="https://shop.test/reset/abc"><img src="logo.png" alt=""></a>'
+        '<a href="https://shop.test/reset/abc">Reset your password</a>'
+    )
+
+    assert email.link(text="Reset your password") == "https://shop.test/reset/abc"
+
+
+def test_an_image_alt_text_is_the_text_of_its_link() -> None:
+    email = message(html='<a href="https://shop.test/confirm"><img alt="Confirm"></a>')
+
+    assert email.link(text="confirm") == "https://shop.test/confirm"
+
+
+def test_a_failure_lists_every_text_of_a_link() -> None:
+    email = message(
+        html='<a href="https://shop.test/">Shop</a><a href="https://shop.test/">Home</a>'
+    )
+
+    with pytest.raises(MailpitAssertionError) as raised:
+        email.link(text="Reset")
+
+    assert str(raised.value).endswith("  https://shop.test/  (text: 'Shop', 'Home')")
+
+
+def test_a_placeholder_host_is_not_a_link() -> None:
+    email = message(
+        html='<a href="https://[unsubscribe_url]">Out</a><a href="https://a.test/">A</a>'
+    )
+
+    assert email.links() == ["https://a.test/"]
+
+
+@pytest.mark.parametrize(
+    ("text", "url"),
+    [
+        ("Отворете „https://app.test/confirm/abc“.", "https://app.test/confirm/abc"),
+        ("Link: «https://app.test/confirm/abc»", "https://app.test/confirm/abc"),
+        ("See https://app.test/wiki/Foo_(bar).", "https://app.test/wiki/Foo_(bar)"),
+        ("Reset: https://app.test/reset/abc​", "https://app.test/reset/abc"),
+    ],
+)
+def test_urls_in_text_end_where_the_sentence_goes_on(text: str, url: str) -> None:
+    assert message(text=text).links() == [url]
+
+
+def test_a_number_far_from_the_keyword_on_its_line_is_not_a_code() -> None:
+    text = "Welcome 55821. " + "Thank you for shopping with us. " * 3 + "Your code: 9134"
+
+    assert message(text=text).codes() == ["9134"]
+
+
+def test_a_code_on_its_own_line_far_below_the_keyword_is_found_by_distance() -> None:
+    text = "Your code\nis below.\nKeep it safe.\nDo not share it.\n4829"
+
+    assert message(text=text).codes() == ["4829"]

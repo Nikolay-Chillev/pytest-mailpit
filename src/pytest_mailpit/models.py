@@ -619,7 +619,9 @@ def _link_outcome(link: LinkStatus) -> str:
 
 
 def _describe_link(link: Link) -> str:
-    return f"{link.url}  (text: {link.text!r})" if link.text else link.url
+    if not link.texts:
+        return link.url
+    return f"{link.url}  (text: {', '.join(repr(text) for text in link.texts)})"
 
 
 @dataclass(frozen=True, slots=True)
