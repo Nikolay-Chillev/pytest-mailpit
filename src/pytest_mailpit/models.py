@@ -10,13 +10,28 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 from pytest_mailpit.errors import MailpitAssertionError
 from pytest_mailpit.extract import Link, filter_links, find_codes, find_links, html_to_text
 
 if TYPE_CHECKING:
     from pytest_mailpit.client import MailpitClient
+
+PageT = TypeVar("PageT", bound="Page")
+
+
+class Page(Protocol):
+    """What :meth:`Message.open` needs of a browser page, e.g. Playwright's."""
+
+    def goto(self, url: str, /) -> Any: ...
+
+
+class ScreenshotPage(Page, Protocol):
+    """What :meth:`Message.screenshot` needs of a browser page, e.g. Playwright's."""
+
+    def screenshot(self, *, path: str | None = ..., full_page: bool = ...) -> bytes: ...
+
 
 # Longest excerpt of a message body shown in a failure.
 _EXCERPT_CHARS = 300
@@ -524,11 +539,34 @@ class Message:
             ]
         raise MailpitAssertionError("\n".join(lines))
 
+    def open(self, page: PageT) -> PageT:
+        """Show the message's HTML in a browser page, as its recipient would see it,
+        and return the page, e.g. to click a link in it.
+
+        The page is Mailpit's rendering of the HTML part, inline images included;
+        it works with a Playwright ``Page`` or anything else with ``goto(url)``.
+        If Mailpit asks for a password, give the browser context its
+        ``http_credentials``. Raises MailpitAssertionError, a test failure, if
+        the message has no HTML part.
+        """
+        __tracebackhide__ = True
+        if not self.html.strip():
+            raise MailpitAssertionError(f"The {self._describe()} has no HTML part to open.")
+        page.goto(self._require_client().html_url(self.id))
+        return page
+
+    def screenshot(self, page: ScreenshotPage, *, path: str | None = None) -> bytes:
+        """Open the message in ``page`` and return a PNG of the whole of it,
+        also saved to ``path`` if given, e.g. for visual comparison."""
+        __tracebackhide__ = True
+        self.open(page)
+        return page.screenshot(path=path, full_page=True)
+
     def _require_client(self) -> "MailpitClient":
         if self._client is None:
             raise ValueError(
                 "The message was not fetched by a MailpitClient; "
-                "call the client's check_links() or check_html() with its ID"
+                "ask the client with the message's ID instead"
             )
         return self._client
 

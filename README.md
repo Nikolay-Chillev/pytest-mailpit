@@ -153,6 +153,35 @@ A failure lists the broken links with their status, or the HTML and CSS features
 
 Mailpit sends a HEAD request to every link, so the links must be reachable from where Mailpit runs. Since Mailpit 1.29.2 it refuses to check private and internal addresses, such as `localhost` or a Docker service; to check links to the application under test, start Mailpit with `MP_ALLOW_INTERNAL_HTTP_REQUESTS=true`. `message.check_links()` and `message.check_html()` return the full results without asserting.
 
+#### In the browser
+
+`link()` finds a link in the HTML, but not whether the recipient can see and click it. `message.open(page)` shows the email in a browser page as its recipient would, inline images included, so the test can click through like a person:
+
+```python
+import re
+
+from playwright.sync_api import expect
+
+
+def test_confirmation_email(page, app_client, mailpit_inbox):
+    app_client.post("/sign-up", data={"email": mailpit_inbox.address})
+    message = mailpit_inbox.wait_for_message(subject="Confirm your email")
+
+    message.open(page)
+    page.get_by_role("link", name="Confirm your email").click()
+
+    expect(page).to_have_url(re.compile("/welcome"))
+```
+
+`message.screenshot(page, path="confirm.png")` returns a PNG of the whole email, for a report or a visual comparison. Both work with a Playwright `Page`, such as pytest-playwright's `page` fixture, and with anything else that has `goto()`; pytest-mailpit does not depend on Playwright. If Mailpit asks for a password, give the browser context its credentials:
+
+```python
+@pytest.fixture(scope="session")
+def browser_context_args(browser_context_args):
+    credentials = {"username": "qa", "password": os.environ["MAILPIT_PASSWORD"]}
+    return {**browser_context_args, "http_credentials": credentials}
+```
+
 ### More than one address
 
 `mailpit_inbox_factory` creates another inbox each time it is called:
