@@ -1,5 +1,6 @@
 """Waiting, link and code extraction against a real Mailpit."""
 
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -71,7 +72,8 @@ def test_timeout_failure_lists_what_arrived(
         client.wait_for_message(recipient=recipient, subject="Reset your password", timeout=0.5)
 
     assert "none arrived" in str(raised.value)
-    assert f"{recipient}  Welcome" in str(raised.value)
+    assert f"Messages to {recipient} (1):" in str(raised.value)
+    assert re.search(rf"{re.escape(recipient)} +Welcome", str(raised.value))
 
 
 def test_assert_no_message(client: MailpitClient, send_email: SendEmail, recipient: str) -> None:

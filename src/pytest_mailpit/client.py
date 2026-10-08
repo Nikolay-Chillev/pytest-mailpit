@@ -229,7 +229,8 @@ class MailpitClient:
             if remaining <= 0:
                 arrived = f"{len(found)} arrived" if found else "none arrived"
                 raise MailpitAssertionError(
-                    f"Expected {expected} within {timeout:g}s, {arrived}.\n{self._newest()}"
+                    f"Expected {expected} within {timeout:g}s, {arrived}.\n"
+                    f"{self._what_arrived(criteria)}"
                 )
             time.sleep(min(self.poll_interval, remaining))
 
@@ -270,16 +271,30 @@ class MailpitClient:
         found.reverse()  # oldest first
         return found
 
-    def _newest(self) -> str:
+    def _what_arrived(self, criteria: "_Criteria") -> str:
+        """For a failure: the messages to the recipient, or else the newest in Mailpit.
+
+        Mailpit is often shared by many tests, so the recipient's messages say
+        more than the newest ones, which may all belong to other tests.
+        """
         try:
+            if criteria.recipient is not None:
+                query = build_query(addressed=criteria.recipient)
+                found = [s for s in self.search_all(query) if criteria.has_recipient(s)]
+                if found:
+                    return (
+                        f"Messages to {criteria.recipient}{_count(found)}:\n"
+                        f"{message_table(found[_FAILURE_TABLE_SIZE - 1 :: -1])}"
+                    )
             page = self.messages(limit=_FAILURE_TABLE_SIZE)
         except MailpitError as error:
             return f"Could not list the messages in Mailpit: {error}"
+        intro = f"No messages to {criteria.recipient}. " if criteria.recipient is not None else ""
         if not page.messages:
-            return "Mailpit has no messages."
+            return f"{intro}Mailpit has no messages."
         return (
-            f"Newest messages in Mailpit ({len(page.messages)} of {page.total}):\n"
-            f"{message_table(page.messages)}"
+            f"{intro}Newest messages in Mailpit ({len(page.messages)} of {page.total}):\n"
+            f"{message_table(page.messages[::-1])}"
         )
 
     # Changing
@@ -352,19 +367,31 @@ class _Criteria:
         )
 
     def matches(self, summary: MessageSummary) -> bool:
-        if self.recipient is not None:
-            recipients = (*summary.to, *summary.cc, *summary.bcc)
-            if all(address.address.lower() != self.recipient for address in recipients):
-                return False
+        if not self.has_recipient(summary):
+            return False
         if self.sender is not None and summary.sender.address.lower() != self.sender:
             return False
         return self.since is None or summary.created >= self.since
+
+    def has_recipient(self, summary: MessageSummary) -> bool:
+        """Whether the message went to the recipient (in To, Cc or Bcc), if one was given."""
+        if self.recipient is None:
+            return True
+        recipients = (*summary.to, *summary.cc, *summary.bcc)
+        return any(address.address.lower() == self.recipient for address in recipients)
 
     def __str__(self) -> str:
         text = self.query
         if self.since is not None:
             text += f" since {self.since.astimezone(UTC):%H:%M:%S} UTC"
         return text
+
+
+def _count(found: list[MessageSummary]) -> str:
+    """ " (3)", or " (12, newest 10 shown)" when the table is cut short."""
+    if len(found) > _FAILURE_TABLE_SIZE:
+        return f" ({len(found)}, newest {_FAILURE_TABLE_SIZE} shown)"
+    return f" ({len(found)})"
 
 
 def _require_query(query: str) -> None:

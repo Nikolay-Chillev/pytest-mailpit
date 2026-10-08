@@ -169,16 +169,21 @@ def test_wait_for_messages_returns_them_oldest_first(
 # Failures
 
 
-def test_timeout_lists_the_newest_messages(
+def search_for(query: str) -> list[Any]:
+    return [matchers.query_param_matcher({"query": query, "start": 0, "limit": 250})]
+
+
+def test_timeout_lists_what_arrived_for_the_recipient(
     mocked: responses.RequestsMock, client: MailpitClient
 ) -> None:
-    mocked.get(SEARCH, json=page())
+    mocked.get(SEARCH, json=page(), match=search_for('addressed:"a@x.test" subject:"Reset"'))
     mocked.get(
-        f"{URL}api/v1/messages",
+        SEARCH,
         json=page(
-            summary("x", to="other@x.test", subject="Welcome", created="2026-10-07T11:22:33Z")
-        )
-        | {"total": 7},
+            summary("other", to="ba@x.test", subject="Not mine"),
+            summary("mine", to="a@x.test", subject="Welcome", created="2026-10-07T11:22:33Z"),
+        ),
+        match=search_for('addressed:"a@x.test"'),
     )
 
     with pytest.raises(MailpitAssertionError) as raised:
@@ -187,10 +192,53 @@ def test_timeout_lists_the_newest_messages(
     assert str(raised.value) == (
         'Expected 1 message matching addressed:"a@x.test" subject:"Reset" within 0.3s, '
         "none arrived.\n"
-        "Newest messages in Mailpit (1 of 7):\n"
-        "  Received (UTC)  To            Subject\n"
-        "  11:22:33        other@x.test  Welcome"
+        "Messages to a@x.test (1):\n"
+        "  Received (UTC)  To        Subject\n"
+        "  11:22:33        a@x.test  Welcome"
     )
+
+
+def test_timeout_lists_the_newest_messages_when_none_went_to_the_recipient(
+    mocked: responses.RequestsMock, client: MailpitClient
+) -> None:
+    mocked.get(SEARCH, json=page())
+    mocked.get(
+        f"{URL}api/v1/messages",
+        json=page(
+            summary("new", to="other@x.test", subject="Second", created="2026-10-07T11:22:34Z"),
+            summary("old", to="other@x.test", subject="First", created="2026-10-07T11:22:33Z"),
+        )
+        | {"total": 7},
+    )
+
+    with pytest.raises(MailpitAssertionError) as raised:
+        client.wait_for_message(recipient="a@x.test")
+
+    assert str(raised.value).endswith(
+        "none arrived.\n"
+        "No messages to a@x.test. Newest messages in Mailpit (2 of 7):\n"
+        "  Received (UTC)  To            Subject\n"
+        "  11:22:33        other@x.test  First\n"
+        "  11:22:34        other@x.test  Second"
+    )
+
+
+def test_timeout_shows_at_most_ten_of_the_recipients_messages(
+    mocked: responses.RequestsMock, client: MailpitClient
+) -> None:
+    mocked.get(SEARCH, json=page(), match=search_for('addressed:"a@x.test" subject:"Reset"'))
+    newest_first = [
+        summary(f"m{n}", to="a@x.test", subject=f"Mail {n}", created=f"2026-10-07T11:00:{n:02}Z")
+        for n in range(12, 0, -1)
+    ]
+    mocked.get(SEARCH, json=page(*newest_first), match=search_for('addressed:"a@x.test"'))
+
+    with pytest.raises(MailpitAssertionError) as raised:
+        client.wait_for_message(recipient="a@x.test", subject="Reset")
+
+    lines = str(raised.value).splitlines()
+    assert lines[1] == "Messages to a@x.test (12, newest 10 shown):"
+    assert [line.split()[-1] for line in lines[3:]] == [str(n) for n in range(3, 13)]
 
 
 def test_timeout_says_how_many_of_several_arrived(
