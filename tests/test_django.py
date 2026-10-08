@@ -25,6 +25,8 @@ from tests import samples
 from tests.test_waiting import page
 
 URL = "http://localhost:8025/"
+# The inner sessions set Django up themselves, whether pytest-django is installed or not.
+NO_PYTEST_DJANGO = ("-p", "no:django")
 # Django 6.1 configures email with MAILERS, older versions with EMAIL_BACKEND.
 HAS_MAILERS = django.VERSION >= (6, 1)
 
@@ -47,7 +49,7 @@ def server() -> Iterator[responses.RequestsMock]:
 
 
 @pytest.fixture
-def django_test_environment() -> Iterator[None]:
+def django_keeps_email_in_memory() -> Iterator[None]:
     """Django set up as its test runner and pytest-django do: email stays in memory."""
     mailers = {"default": {"OPTIONS": {"host": "smtp.example.net"}}, "alerts": {}}
     settings.configure(**({"MAILERS": mailers} if HAS_MAILERS else {}))
@@ -117,12 +119,12 @@ def test_without_mailpit_again():
 
 
 def test_the_fixture_sends_djangos_email_to_mailpit_for_one_test(
-    pytester: pytest.Pytester, server: responses.RequestsMock, django_test_environment: None
+    pytester: pytest.Pytester, server: responses.RequestsMock, django_keeps_email_in_memory: None
 ) -> None:
     pytester.makeini("[pytest]\nmailpit_smtp = mail.test:2525\n")
     pytester.makepyfile(USES_MAILPIT_DJANGO)
 
-    pytester.runpytest().assert_outcomes(passed=2)
+    pytester.runpytest(*NO_PYTEST_DJANGO).assert_outcomes(passed=2)
 
 
 def test_the_fixture_needs_django(
@@ -131,7 +133,7 @@ def test_the_fixture_needs_django(
     monkeypatch.setitem(sys.modules, "django", None)
     pytester.makepyfile("def test_django(mailpit_django): pass")
 
-    result = pytester.runpytest()
+    result = pytester.runpytest(*NO_PYTEST_DJANGO)
 
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["mailpit_django needs Django: pip install django"])
@@ -142,7 +144,7 @@ def test_the_fixture_needs_django(
 
 
 def test_a_message_kept_in_djangos_outbox_gets_a_hint(
-    server: responses.RequestsMock, django_test_environment: None
+    server: responses.RequestsMock, django_keeps_email_in_memory: None
 ) -> None:
     with pytest.raises(MailpitAssertionError) as failure:
         MailpitClient(URL).wait_for_message(recipient="new@example.com", timeout=0)
