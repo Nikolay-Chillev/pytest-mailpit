@@ -249,6 +249,14 @@ jobs:
       - run: pytest
 ```
 
+### Recipes
+
+- [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host, and how the two find each other.
+- [Testcontainers](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers): Mailpit started by the test session, so nothing has to run before `pytest`.
+- [Migrating from MailHog](https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/docs/migrating-from-mailhog.md): the container settings, the API and the message fields, call by call.
+
+Both examples run in CI on every change.
+
 ## Is this the right tool?
 
 | Your test | Use |
