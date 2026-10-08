@@ -112,6 +112,9 @@ class AsyncMailpitClient:
     def html_url(self, message_id: str) -> str:
         return self.sync.html_url(message_id)
 
+    def search_url(self, query: str) -> str:
+        return self.sync.search_url(query)
+
     # Waiting: the criteria and failures of MailpitClient's methods.
 
     async def wait_for_message(
@@ -185,6 +188,9 @@ class AsyncMailpitClient:
 
     async def mark_read(self, message_ids: Iterable[str], *, read: bool = True) -> None:
         await asyncio.to_thread(self.sync.mark_read, list(message_ids), read=read)
+
+    async def set_tags(self, message_ids: Iterable[str], tags: Iterable[str]) -> None:
+        await asyncio.to_thread(self.sync.set_tags, list(message_ids), list(tags))
 
     # Chaos
 

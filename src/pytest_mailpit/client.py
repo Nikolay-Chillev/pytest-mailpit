@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import NamedTuple, Self
-from urllib.parse import urljoin
+from urllib.parse import quote, urlencode, urljoin
 
 from pytest_mailpit._django import outbox_hint
 from pytest_mailpit._http import Transport
@@ -189,6 +189,11 @@ class MailpitClient:
     def view_url(self, message_id: str) -> str:
         """The page of the message in Mailpit's web UI, without credentials."""
         return urljoin(self.url, f"view/{message_id}")
+
+    def search_url(self, query: str) -> str:
+        """Mailpit's web UI searching for ``query``, without credentials."""
+        _require_query(query)
+        return urljoin(self.url, f"search?{urlencode({'q': query}, quote_via=quote)}")
 
     def html_url(self, message_id: str) -> str:
         """Just the message's HTML part, with inline images, as Mailpit renders it for
@@ -372,6 +377,16 @@ class MailpitClient:
         ids = _unique(message_ids)
         if ids:
             self._http.request("PUT", "api/v1/messages", json_body={"IDs": ids, "Read": read})
+
+    def set_tags(self, message_ids: Iterable[str], tags: Iterable[str]) -> None:
+        """Replace the tags of the given messages; no tags removes them.
+
+        Mailpit keeps letters, digits, spaces and ``-_.@`` in a tag, up to 100
+        characters, and replaces anything else with a space.
+        """
+        ids = _unique(message_ids)
+        if ids:
+            self._http.request("PUT", "api/v1/tags", json_body={"IDs": ids, "Tags": list(tags)})
 
     # Chaos: SMTP errors on purpose. Mailpit must run with Chaos enabled
     # (MP_ENABLE_CHAOS=true or --enable-chaos), or it answers with HTTP 400.

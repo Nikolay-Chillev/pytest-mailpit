@@ -122,6 +122,46 @@ def test_a_failed_test_keeps_its_messages_and_shows_them(
     assert messages_to(client, domain) == ["Welcome"]
 
 
+def test_a_failed_tests_messages_are_tagged_with_its_name(
+    pytester: pytest.Pytester, client: MailpitClient, domain: str
+) -> None:
+    pytester.makepyfile(
+        """
+        import os
+        import smtplib
+        from email.message import EmailMessage
+        from urllib.parse import urlsplit
+
+
+        def test_wrong_email(mailpit_inbox):
+            smtp = urlsplit("//" + os.environ.get("MAILPIT_SMTP", "localhost:1025"))
+            message = EmailMessage()
+            message["From"] = "app@example.test"
+            message["To"] = mailpit_inbox.address
+            message["Subject"] = "Welcome"
+            message["X-Tags"] = "signup"  # a tag the application gives its email
+            message.set_content("Hello")
+            with smtplib.SMTP(smtp.hostname, smtp.port, timeout=10) as server:
+                server.send_message(message)
+
+            mailpit_inbox.wait_for_message()
+            assert False, "the link was wrong"
+        """
+    )
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=1)
+    [kept] = client.search_all(build_query(addressed=domain))
+    assert set(kept.tags) == {"signup", "failed test_wrong_email"}
+    # The report's link searches Mailpit for the tag, and finds the message.
+    result.stdout.fnmatch_lines(
+        ["Tagged 'failed test_wrong_email': *search?q=tag%3A%22failed%20test_wrong_email%22"]
+    )
+    found = client.search_all(build_query(tag="failed test_wrong_email"))
+    assert kept.id in [summary.id for summary in found]
+
+
 def test_a_failed_tests_real_email_lands_in_allure_and_pytest_html(
     pytester: pytest.Pytester, domain: str
 ) -> None:

@@ -42,6 +42,8 @@ class MailpitConfig:
     domain: str = DEFAULT_DOMAIN
     # Keep a failed test's messages in Mailpit, to look at them in its web UI.
     keep_on_failure: bool = True
+    # Tag the kept messages with the test's name, to find them in Mailpit's web UI.
+    tag_failures: bool = True
     # List a failed test's messages in its report and attach them to Allure and
     # pytest-html reports. Off for emails that must not end up in CI artifacts.
     report_messages: bool = True

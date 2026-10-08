@@ -16,6 +16,7 @@ Wait timeout (s)       ``--mailpit-timeout``   ``MAILPIT_WAIT_TIMEOUT``  ``mailp
 Poll interval (s)                                                        ``mailpit_poll_interval``
 Inbox domain                                                             ``mailpit_domain``
 Keep failed messages                                                     ``mailpit_keep_on_failure``
+Tag failed messages                                                      ``mailpit_tag_failures``
 Report failed messages                                                   ``mailpit_report_messages``
 When unreachable                                                         ``mailpit_unreachable``
 SMTP host:port                                 ``MAILPIT_SMTP``          ``mailpit_smtp``
@@ -37,7 +38,7 @@ import pytest
 from pytest_mailpit._container import start_container, testcontainers_installed
 from pytest_mailpit._django import email_settings
 from pytest_mailpit._http import _without_credentials
-from pytest_mailpit._reporting import report_failure
+from pytest_mailpit._reporting import failure_tag, report_failure
 from pytest_mailpit.aio import AsyncInbox, AsyncMailpitClient
 from pytest_mailpit.chaos import Chaos
 from pytest_mailpit.client import MailpitClient
@@ -102,6 +103,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addini(
         "mailpit_keep_on_failure",
         "Keep the messages of a failed test in Mailpit.",
+        type="bool",
+        default=True,
+    )
+    parser.addini(
+        "mailpit_tag_failures",
+        "Tag the messages a failed test kept with the test's name, to find them in Mailpit.",
         type="bool",
         default=True,
     )
@@ -191,6 +198,7 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         ),
         domain=domain.strip(),
         keep_on_failure=bool(config.getini("mailpit_keep_on_failure")),
+        tag_failures=bool(config.getini("mailpit_tag_failures")),
         report_messages=bool(config.getini("mailpit_report_messages")),
         skip_if_unreachable=unreachable == "skip",
         smtp=_smtp(setting(None, "MAILPIT_SMTP", "mailpit_smtp"), defaults.smtp),
@@ -218,16 +226,18 @@ def pytest_runtest_makereport(
 
 
 def _record(item: pytest.Item, report: pytest.TestReport) -> None:
-    """Remember the report for the inbox teardown, and add the inbox's messages to failures."""
+    """Remember the report for the inbox teardown; tag and report a failed test's messages."""
     item.stash.setdefault(_REPORTS, {})[report.when] = report
     inboxes = item.stash.get(_INBOXES, [])
-    if (
-        report.when == "call"
-        and report.failed
-        and inboxes
-        and item.config.stash[_CONFIG].report_messages
-    ):
-        report_failure(item.config, report, inboxes)
+    if report.when != "call" or not report.failed or not inboxes:
+        return
+    config = item.config.stash[_CONFIG]
+    # Tags only help find messages that are kept.
+    tag = failure_tag(item.nodeid) if config.keep_on_failure and config.tag_failures else None
+    if tag is not None or config.report_messages:
+        report_failure(
+            item.config, report, inboxes, tag=tag, report_messages=config.report_messages
+        )
 
 
 # Fixtures
