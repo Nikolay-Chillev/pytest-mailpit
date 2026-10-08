@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+import requests
 import responses
 from requests import PreparedRequest
 
@@ -243,18 +244,35 @@ def test_tls_verification_words(
 def test_unreachable_mailpit_fails_with_what_to_do(pytester: pytest.Pytester) -> None:
     pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
 
-    # No mock is registered, so the connection is refused.
-    with responses.RequestsMock():
+    with responses.RequestsMock() as mock:
+        refused = requests.ConnectionError("[Errno 111] Connection refused")
+        mock.get(f"{URL}api/v1/info", body=refused)
         result = pytester.runpytest()
 
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(
         [
-            "*Cannot reach Mailpit at http://localhost:8025/.",
-            "*docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit",
-            "*--mailpit-url or MAILPIT_URL*",
-        ]
+            "*ERROR at setup of test_needs_mailpit*",
+            "Cannot reach Mailpit at http://localhost:8025/ ([[]Errno 111] Connection refused).",
+            "Start Mailpit, for example: docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit",
+            "or point pytest-mailpit at it with --mailpit-url or MAILPIT_URL.",
+            "*short test summary info*",
+        ],
+        consecutive=True,
     )
+
+
+def test_a_multi_line_cause_is_cut_to_its_first_line(pytester: pytest.Pytester) -> None:
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
+
+    # Nothing is registered: the mock refuses with a message of several lines.
+    with responses.RequestsMock():
+        result = pytester.runpytest()
+
+    result.stdout.fnmatch_lines(
+        ["Cannot reach Mailpit at http://localhost:8025/ (Connection refused by Responses*)."]
+    )
+    assert "Available matches" not in result.stdout.str()
 
 
 def test_unreachable_mailpit_can_skip_the_tests(pytester: pytest.Pytester) -> None:
@@ -286,6 +304,7 @@ def test_mailpit_answering_with_an_error(
 
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines([message])
+    assert "During handling of the above exception" not in result.stdout.str()
 
 
 def test_old_mailpit_versions_get_a_warning(pytester: pytest.Pytester) -> None:
@@ -488,3 +507,27 @@ def test_marker_without_timeout_uses_the_default(
     )
 
     pytester.runpytest().assert_outcomes(passed=1)
+
+
+def test_failures_point_at_the_test_not_at_pytest_mailpit(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    pytester.makepyfile(
+        """
+        def test_wait(mailpit_inbox):
+            mailpit_inbox.assert_no_message(within=0)
+
+        def test_link(mailpit_inbox):
+            message = mailpit_inbox.wait_for_message()
+            message.link("/does-not-exist/")
+        """
+    )
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=2)
+    output = result.stdout.str()
+    assert "mailpit_inbox.assert_no_message(within=0)" in output
+    assert 'message.link("/does-not-exist/")' in output
+    for module in ("client.py", "inbox.py", "models.py"):
+        assert f"pytest_mailpit{__import__('os').sep}{module}" not in output

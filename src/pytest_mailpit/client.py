@@ -180,6 +180,8 @@ class MailpitClient:
         ``timeout`` seconds or if more than one matches. The failure lists the
         newest messages in Mailpit, to show what arrived instead.
         """
+        # Hide this frame from pytest tracebacks: failures point at the calling test.
+        __tracebackhide__ = True
         [message] = self.wait_for_messages(
             1,
             query,
@@ -210,6 +212,7 @@ class MailpitClient:
         Raises MailpitAssertionError, a test failure, if fewer arrive within
         ``timeout`` seconds or if more than ``count`` match.
         """
+        __tracebackhide__ = True
         if count < 1:
             raise ValueError("count must be at least 1; use assert_no_message to expect none")
         criteria = _Criteria.build(query, recipient, sender, subject, tag, since)
@@ -249,6 +252,7 @@ class MailpitClient:
 
         Raises MailpitAssertionError, a test failure, as soon as one does.
         """
+        __tracebackhide__ = True
         criteria = _Criteria.build(query, recipient, sender, subject, tag, since)
         _require_not_negative(within=within)
         deadline = time.monotonic() + within
