@@ -15,6 +15,10 @@ from pytest_mailpit.inbox import Inbox
 from pytest_mailpit.models import (
     Address,
     Attachment,
+    HTMLCheck,
+    HTMLWarning,
+    LinkCheck,
+    LinkStatus,
     ListUnsubscribe,
     Message,
     MessageList,
@@ -28,7 +32,11 @@ __version__ = version("pytest-mailpit")
 __all__ = [
     "Address",
     "Attachment",
+    "HTMLCheck",
+    "HTMLWarning",
     "Inbox",
+    "LinkCheck",
+    "LinkStatus",
     "ListUnsubscribe",
     "MailpitAPIError",
     "MailpitAssertionError",

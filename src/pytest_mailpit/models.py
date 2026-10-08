@@ -7,13 +7,16 @@ models parse responses from every supported server version.
 
 import fnmatch
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pytest_mailpit.errors import MailpitAssertionError
 from pytest_mailpit.extract import Link, filter_links, find_codes, find_links, html_to_text
+
+if TYPE_CHECKING:
+    from pytest_mailpit.client import MailpitClient
 
 # Longest excerpt of a message body shown in a failure.
 _EXCERPT_CHARS = 300
@@ -144,6 +147,116 @@ class MessageSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class LinkStatus:
+    """One link of Mailpit's link check."""
+
+    url: str
+    # 0 when the request failed, e.g. the host does not exist.
+    status_code: int
+    status: str
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any]) -> Self:
+        return cls(
+            url=data.get("URL") or "",
+            status_code=data.get("StatusCode") or 0,
+            status=data.get("Status") or "",
+        )
+
+    @property
+    def ok(self) -> bool:
+        return 0 < self.status_code < 400
+
+    @property
+    def blocked(self) -> bool:
+        """Mailpit refused to check it: the address is private or internal (Mailpit 1.29.2+)."""
+        return self.status_code == 451 and "private/reserved" in self.status
+
+
+@dataclass(frozen=True, slots=True)
+class LinkCheck:
+    """``GET /api/v1/message/{ID}/link-check``: Mailpit's HEAD request to every link."""
+
+    links: tuple[LinkStatus, ...]
+    # How many links failed, as Mailpit counts them.
+    errors: int
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any]) -> Self:
+        return cls(
+            links=tuple(LinkStatus.from_api(item) for item in data.get("Links") or ()),
+            errors=data.get("Errors") or 0,
+        )
+
+    @property
+    def broken(self) -> tuple[LinkStatus, ...]:
+        return tuple(link for link in self.links if not link.ok)
+
+
+@dataclass(frozen=True, slots=True)
+class HTMLWarning:
+    """An HTML or CSS feature of the message that some email clients do not support."""
+
+    slug: str
+    title: str
+    description: str
+    url: str  # its page on caniemail.com
+    category: str  # "html" or "css"
+    # How often the message uses it.
+    found: int
+    # Percentages of the email clients that support it fully, partly or not at all.
+    supported: float
+    partial: float
+    unsupported: float
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any]) -> Self:
+        score = data.get("Score") or {}
+        return cls(
+            slug=data.get("Slug") or "",
+            title=data.get("Title") or "",
+            description=data.get("Description") or "",
+            url=data.get("URL") or "",
+            category=data.get("Category") or "",
+            found=score.get("Found") or 0,
+            supported=score.get("Supported") or 0.0,
+            partial=score.get("Partial") or 0.0,
+            unsupported=score.get("Unsupported") or 0.0,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class HTMLCheck:
+    """``GET /api/v1/message/{ID}/html-check``: how well email clients support the
+    message's HTML and CSS, from caniemail.com data."""
+
+    # Percentages of the message's HTML and CSS that email clients support fully,
+    # partly or not at all; they add up to 100.
+    supported: float
+    partial: float
+    unsupported: float
+    tests: int
+    nodes: int
+    # The problems, the worst first.
+    warnings: tuple[HTMLWarning, ...]
+    # Email client families to the platforms Mailpit checked them on.
+    platforms: Mapping[str, list[str]] = field(default_factory=dict, hash=False)
+
+    @classmethod
+    def from_api(cls, data: Mapping[str, Any]) -> Self:
+        total = data.get("Total") or {}
+        return cls(
+            supported=total.get("Supported") or 0.0,
+            partial=total.get("Partial") or 0.0,
+            unsupported=total.get("Unsupported") or 0.0,
+            tests=total.get("Tests") or 0,
+            nodes=total.get("Nodes") or 0,
+            warnings=tuple(HTMLWarning.from_api(item) for item in data.get("Warnings") or ()),
+            platforms=dict(data.get("Platforms") or {}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     """A whole message, as returned by ``GET /api/v1/message/{ID}``."""
 
@@ -167,10 +280,13 @@ class Message:
     inline: tuple[Attachment, ...]
     list_unsubscribe: ListUnsubscribe
     username: str = ""
+    # The client that fetched the message, for the checks that ask Mailpit.
+    _client: "MailpitClient | None" = field(default=None, compare=False, repr=False, hash=False)
 
     @classmethod
-    def from_api(cls, data: Mapping[str, Any]) -> Self:
+    def from_api(cls, data: Mapping[str, Any], *, client: "MailpitClient | None" = None) -> Self:
         return cls(
+            _client=client,
             id=data["ID"],
             message_id=data.get("MessageID") or "",
             sender=Address.from_api(data.get("From")),
@@ -343,6 +459,79 @@ class Message:
             return unsubscribe.http_link
         raise MailpitAssertionError(f"The {self._describe()} {problem}.")
 
+    def check_links(self, *, follow_redirects: bool = False) -> LinkCheck:
+        """Mailpit's link check: a HEAD request to every link in the message."""
+        return self._require_client().check_links(self.id, follow_redirects=follow_redirects)
+
+    def assert_links_work(
+        self, *, follow_redirects: bool = False, ignore: Iterable[str] = ()
+    ) -> LinkCheck:
+        """Fail the test if a link in the message is broken, and return the check.
+
+        A link is broken when it answers with an error status (400 and above)
+        or not at all. Links containing any of the ``ignore`` strings are not
+        held against the message, e.g. social networks that refuse HEAD requests.
+        With ``follow_redirects`` the status of the final page counts.
+        """
+        __tracebackhide__ = True
+        result = self.check_links(follow_redirects=follow_redirects)
+        ignored = tuple(ignore)
+        broken = [link for link in result.broken if not any(part in link.url for part in ignored)]
+        if not broken:
+            return result
+        outcomes = [_link_outcome(link) for link in broken]
+        width = max(len(outcome) for outcome in outcomes)
+        lines = [f"{len(broken)} of {len(result.links)} links in {self._describe()} are broken:"]
+        lines += [
+            f"  {outcome:<{width}}  {link.url}"
+            for outcome, link in zip(outcomes, broken, strict=True)
+        ]
+        if any(link.blocked for link in broken):
+            lines.append(
+                "Mailpit refuses to check links to private or internal addresses. To check "
+                "links to an application on localhost or in Docker, start Mailpit with "
+                "MP_ALLOW_INTERNAL_HTTP_REQUESTS=true (--allow-internal-http-requests)."
+            )
+        raise MailpitAssertionError("\n".join(lines))
+
+    def check_html(self) -> HTMLCheck:
+        """Mailpit's HTML check: how well email clients support the message's HTML and CSS."""
+        return self._require_client().check_html(self.id)
+
+    def assert_html_support(self, at_least: float) -> HTMLCheck:
+        """Fail the test unless email clients support at least ``at_least`` percent
+        of the message's HTML and CSS, and return the check.
+
+        The figure is Mailpit's, from caniemail.com data; its web UI shows the
+        same check. A failure lists the worst problems.
+        """
+        __tracebackhide__ = True
+        if not self.html.strip():
+            raise MailpitAssertionError(f"The {self._describe()} has no HTML part to check.")
+        result = self.check_html()
+        if result.supported >= at_least:
+            return result
+        lines = [
+            f"Email clients support {result.supported:.1f}% of the HTML and CSS in "
+            f"{self._describe()}, expected at least {at_least:g}%."
+        ]
+        if result.warnings:
+            lines.append("Worst problems (caniemail.com data):")
+            lines += [
+                f"  {warning.title}: {warning.unsupported:.0f}% of clients do not support it, "
+                f"{warning.partial:.0f}% partly; used {warning.found}x  {warning.url}"
+                for warning in result.warnings[:5]
+            ]
+        raise MailpitAssertionError("\n".join(lines))
+
+    def _require_client(self) -> "MailpitClient":
+        if self._client is None:
+            raise ValueError(
+                "The message was not fetched by a MailpitClient; "
+                "call the client's check_links() or check_html() with its ID"
+            )
+        return self._client
+
     def _links(self) -> list[Link]:
         return find_links(self.text, self.html)
 
@@ -384,6 +573,11 @@ def _size(size: int) -> str:
     if size < 1_000_000:
         return f"{size / 1000:.1f} kB"
     return f"{size / 1_000_000:.1f} MB"
+
+
+def _link_outcome(link: LinkStatus) -> str:
+    """ "404 Not Found", or the error when the request failed."""
+    return f"{link.status_code} {link.status}" if link.status_code else link.status or "no answer"
 
 
 def _describe_link(link: Link) -> str:
