@@ -6,18 +6,20 @@ in any release.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 
-- `Message.assert_links_work()`: fails the test if a link in the message answers with an error status or not at all, using Mailpit's link check; `ignore` skips links such as social networks, and a hint explains Mailpit's refusal to check internal addresses.
-- `Message.assert_html_support(at_least=...)`: fails the test unless email clients support enough of the message's HTML and CSS, using Mailpit's HTML check (caniemail.com data), and lists the worst problems.
 - `mailpit_container = true` (or `--mailpit-container`): the plugin starts Mailpit in a Docker container for the session through Testcontainers, on first use, with Chaos enabled and without reverse DNS lookups; every pytest-xdist worker gets its own. Install it with `pip install "pytest-mailpit[testcontainers]"`; `mailpit_container_image` picks the image, and the `mailpit_container` fixture is the container.
 - `mailpit_smtp`: the host and port where the application under test sends email, from the container or from `MAILPIT_SMTP` / `mailpit_smtp` (default `localhost:1025`), as an `SMTPServer`.
 - `mailpit_chaos`: makes Mailpit's SMTP server reject messages on purpose (Mailpit's Chaos, `MP_ENABLE_CHAOS=true`), to test how the application handles failed sending. `reject_senders()`, `reject_recipients()` and `reject_authentication()` take the SMTP error code and a probability; `reset()` turns every error off, and the fixture restores Mailpit's previous triggers after the test. It warns when pytest-xdist workers share one Mailpit.
-- A warning at the end of the run when failed tests kept their messages and Mailpit holds 450 messages or more: with its default limit of 500 (`MP_MAX_MESSAGES`), Mailpit deletes the oldest every minute.
 - `MailpitClient.chaos()` and `MailpitClient.set_chaos()`: Mailpit's Chaos triggers as `ChaosTriggers` and `ChaosTrigger`.
+- `Message.assert_links_work()`: fails the test if a link in the message answers with an error status or not at all, using Mailpit's link check; `ignore` skips links such as social networks, and a hint explains Mailpit's refusal to check internal addresses.
+- `Message.assert_html_support(at_least=...)`: fails the test unless email clients support enough of the message's HTML and CSS, using Mailpit's HTML check (caniemail.com data), and lists the worst problems.
+- `Message.check_links()`, `Message.check_html()`, `MailpitClient.check_links()` and `MailpitClient.check_html()` return the full results: `LinkCheck`, `LinkStatus`, `HTMLCheck` and `HTMLWarning`. A message fetched by a client remembers it for these checks.
 - `Message.open(page)`: shows the message's HTML in a browser page as its recipient would see it, inline images included, and returns the page, e.g. to click a link with Playwright. `Message.screenshot(page)` returns a PNG of the whole message. Neither needs Playwright installed; any page with `goto()` works.
 - `MailpitClient.html_url()`: Mailpit's rendering of a message's HTML part.
-- `Message.check_links()`, `Message.check_html()`, `MailpitClient.check_links()` and `MailpitClient.check_html()` return the full results: `LinkCheck`, `LinkStatus`, `HTMLCheck` and `HTMLWarning`. A message fetched by a client remembers it for these checks.
+- A warning at the end of the run when failed tests kept their messages and Mailpit holds 450 messages or more: with its default limit of 500 (`MP_MAX_MESSAGES`), Mailpit deletes the oldest every minute.
 
 ## [0.2.0] - 2026-10-08
 
@@ -53,6 +55,7 @@ The first release.
 - **Links and one-time codes** found in a message's HTML and text.
 - **`MailpitClient`**, a typed client for Mailpit's API: search, messages, headers, raw source, parts, deleting, read status and server time; it works under a web root, with basic auth and custom TLS verification.
 
-[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.1.0a1...v0.2.0
 [0.1.0a1]: https://github.com/Nikolay-Chillev/pytest-mailpit/releases/tag/v0.1.0a1
