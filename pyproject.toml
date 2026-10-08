@@ -46,6 +46,7 @@ dev = [
     "allure-pytest>=2.13",
     "coverage>=7.10",
     "mypy>=2.4",
+    "playwright>=1.55",
     "pytest-html>=4.1",
     "pytest-xdist>=3.8",
     "responses>=0.26",

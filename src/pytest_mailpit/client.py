@@ -188,6 +188,11 @@ class MailpitClient:
         """The page of the message in Mailpit's web UI, without credentials."""
         return urljoin(self.url, f"view/{message_id}")
 
+    def html_url(self, message_id: str) -> str:
+        """Just the message's HTML part, with inline images, as Mailpit renders it for
+        UI tests; without credentials."""
+        return urljoin(self.url, f"view/{message_id}.html")
+
     # Waiting
     #
     # Every method takes a Mailpit search ``query``, criteria, or both:

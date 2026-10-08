@@ -141,7 +141,7 @@ def test_messages_from_the_client_know_it(message: Message) -> None:
 
 
 def test_messages_parsed_by_hand_cannot_ask_mailpit() -> None:
-    with pytest.raises(ValueError, match="not fetched by a MailpitClient"):
+    with pytest.raises(ValueError, match="not fetched by a MailpitClient; ask the client"):
         Message.from_api(samples.MESSAGE).check_links()
 
 

@@ -87,6 +87,8 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e . --group dev
+      - name: Install Chromium for the browser tests
+        run: python -m playwright install --with-deps chromium
       - name: Wait for Mailpit
         run: curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 "${MAILPIT_URL}api/v1/info"
       - run: python -m pytest -m integration
