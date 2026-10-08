@@ -416,6 +416,70 @@ def test_a_failed_test_can_delete_its_messages(
     assert len(deleted_ids(server)) == 1
 
 
+def test_kept_messages_near_mailpits_limit_get_a_warning(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    server.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": 450})
+    pytester.makepyfile(
+        """
+        def test_fails(mailpit_inbox): assert False
+        def test_fails_too(mailpit_inbox): assert False
+        """
+    )
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=2, warnings=1)
+    result.stdout.fnmatch_lines(
+        [
+            "*MailpitWarning: Mailpit at http://localhost:8025/ holds 450 messages. "
+            "With its default limit of 500 (MP_MAX_MESSAGES), it deletes the oldest every minute*"
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("ini", "tests", "held"),
+    [
+        ("", "def test_fails(mailpit_inbox): assert False", 449),
+        ("", "def test_passes(mailpit_inbox): pass", 500),
+        ("mailpit_keep_on_failure = false", "def test_fails(mailpit_inbox): assert False", 500),
+        ("", "def test_fails(mailpit_inbox_factory): assert False", 500),
+        (
+            "filterwarnings = ignore:Mailpit at .* holds:pytest_mailpit.MailpitWarning",
+            "def test_fails(mailpit_inbox): assert False",
+            500,
+        ),
+    ],
+    ids=["below the limit", "nothing failed", "nothing kept", "no inbox", "silenced"],
+)
+def test_no_limit_warning_unless_kept_messages_are_at_risk(
+    pytester: pytest.Pytester, server: responses.RequestsMock, ini: str, tests: str, held: int
+) -> None:
+    server.replace(responses.GET, f"{URL}api/v1/info", json=samples.INFO | {"Messages": held})
+    pytester.makeini(f"[pytest]\n{ini}\n")
+    pytester.makepyfile(tests)
+
+    result = pytester.runpytest()
+
+    assert "MailpitWarning" not in result.stdout.str()
+
+
+def test_the_limit_check_ignores_mailpit_going_away(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    answers: Iterator[tuple[int, dict[str, str], str]] = iter(
+        [(200, {}, json.dumps(samples.INFO)), (503, {}, "shutting down")]
+    )
+    server.remove(responses.GET, f"{URL}api/v1/info")
+    server.add_callback(responses.GET, f"{URL}api/v1/info", callback=lambda request: next(answers))
+    pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=1, warnings=0)
+
+
 def test_failure_report_survives_mailpit_going_away(pytester: pytest.Pytester) -> None:
     pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
 

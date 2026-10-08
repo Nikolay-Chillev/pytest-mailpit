@@ -51,10 +51,15 @@ from pytest_mailpit.models import ChaosTriggers
 
 # The oldest Mailpit version pytest-mailpit is tested against.
 OLDEST_SUPPORTED_VERSION = (1, 22)
+# Unless started with another MP_MAX_MESSAGES, Mailpit keeps the newest 500
+# messages and deletes the others every minute.
+MAILPIT_DEFAULT_MAX_MESSAGES = 500
 
 _CONFIG = pytest.StashKey[MailpitConfig]()
 _REPORTS = pytest.StashKey[dict[str, pytest.TestReport]]()
 _INBOXES = pytest.StashKey[list[Inbox]]()
+# Whether a failed test kept its messages in Mailpit.
+_KEPT = pytest.StashKey[bool]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -280,7 +285,7 @@ def mailpit_smtp(mailpit_config: MailpitConfig) -> SMTPServer:
 
 
 @pytest.fixture(scope="session")
-def mailpit(mailpit_config: MailpitConfig) -> Iterator[MailpitClient]:
+def mailpit(mailpit_config: MailpitConfig, pytestconfig: pytest.Config) -> Iterator[MailpitClient]:
     """A MailpitClient for the configured server, checked to be reachable.
 
     If Mailpit cannot be reached, the tests that use it fail with what to do
@@ -290,6 +295,9 @@ def mailpit(mailpit_config: MailpitConfig) -> Iterator[MailpitClient]:
     try:
         _check_server(client, mailpit_config)
         yield client
+        # A container goes away with the session, and the kept messages with it.
+        if pytestconfig.stash.get(_KEPT, False) and not mailpit_config.container:
+            _warn_if_nearly_full(client)
     finally:
         client.close()
 
@@ -318,6 +326,8 @@ def mailpit_inbox_factory(
 
     reports = request.node.stash.get(_REPORTS, {})
     if mailpit_config.keep_on_failure and any(report.failed for report in reports.values()):
+        if created:
+            request.config.stash[_KEPT] = True
         return
     for inbox in created:
         try:
@@ -419,6 +429,23 @@ def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
             raise
     # Fail outside the except block, so pytest does not print the API error above the message.
     pytest.fail(problem, pytrace=False)
+
+
+def _warn_if_nearly_full(client: MailpitClient) -> None:
+    """Warn when Mailpit may soon delete the messages that failed tests kept."""
+    try:
+        held = client.info().messages
+    except MailpitError:
+        return  # Mailpit went away; the failed tests already said what they could.
+    if held >= MAILPIT_DEFAULT_MAX_MESSAGES * 0.9:
+        warnings.warn(
+            f"Mailpit at {client.url} holds {held} messages. With its default limit of "
+            f"{MAILPIT_DEFAULT_MAX_MESSAGES} (MP_MAX_MESSAGES), it deletes the oldest every "
+            "minute, so the messages kept from failed tests may soon be gone. Delete old "
+            "messages, or start Mailpit with a higher MP_MAX_MESSAGES (0 for no limit).",
+            MailpitWarning,
+            stacklevel=1,
+        )
 
 
 def _root_cause(error: BaseException) -> str:

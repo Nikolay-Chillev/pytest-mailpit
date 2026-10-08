@@ -296,6 +296,8 @@ With [Allure](https://allurereport.org/docs/pytest/) (`--alluredir`) or [pytest-
 
 The ten newest emails of each inbox are attached, and only when the test fails. Emails can hold tokens or personal data; set `mailpit_report_messages = false` to keep them out of reports and CI artifacts.
 
+Mailpit keeps only the newest 500 messages by default (`MP_MAX_MESSAGES`) and deletes the others every minute, so kept messages do not stay forever. When tests failed and Mailpit holds 450 messages or more at the end of the run, a warning says so; if your Mailpit has a higher limit, silence it with `filterwarnings = ignore:Mailpit at .* holds:pytest_mailpit.MailpitWarning`.
+
 If Mailpit is not running, the tests that need it say what to do instead of showing a stack of connection errors:
 
 ```
