@@ -36,7 +36,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from pytest_mailpit._container import start_container, testcontainers_installed
-from pytest_mailpit._django import email_settings
+from pytest_mailpit._django import email_settings, quiet_email_settings
 from pytest_mailpit._http import _without_credentials
 from pytest_mailpit._reporting import failure_tag, report_failure
 from pytest_mailpit.aio import AsyncInbox, AsyncMailpitClient
@@ -382,19 +382,33 @@ def mailpit_django(mailpit: MailpitClient, mailpit_smtp: SMTPServer) -> Iterator
     ``django.core.mail.outbox``. With this fixture it reaches Mailpit as a
     recipient would get it, for mailpit_inbox and the checks on messages.
     """
+    problem = None
     try:
         import django
         from django.conf import settings
+        from django.core.exceptions import ImproperlyConfigured
         from django.test.utils import override_settings
     except ImportError:
-        missing = True
+        problem = "mailpit_django needs Django: pip install django"
     else:
-        missing = False
-    if missing:
-        pytest.fail("mailpit_django needs Django: pip install django", pytrace=False)
-    mailers = getattr(settings, "MAILERS", None)
-    with override_settings(**email_settings(django.VERSION, mailers, mailpit_smtp)):
+        try:
+            mailers = getattr(settings, "MAILERS", None)
+        except ImproperlyConfigured:
+            problem = (
+                "mailpit_django needs Django's settings: use pytest-django with "
+                "DJANGO_SETTINGS_MODULE, or call django.conf.settings.configure()."
+            )
+    # Fail outside the except blocks, so pytest does not print Django's traceback first.
+    if problem is not None:
+        pytest.fail(problem, pytrace=False)
+    override = override_settings(**email_settings(django.VERSION, mailers, mailpit_smtp))
+    with quiet_email_settings():
+        override.enable()
+    try:
         yield
+    finally:
+        with quiet_email_settings():
+            override.disable()
 
 
 @pytest.fixture
