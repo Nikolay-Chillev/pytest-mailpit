@@ -38,6 +38,7 @@ from pytest_mailpit._container import start_container, testcontainers_installed
 from pytest_mailpit._django import email_settings
 from pytest_mailpit._http import _without_credentials
 from pytest_mailpit._reporting import report_failure
+from pytest_mailpit.aio import AsyncInbox, AsyncMailpitClient
 from pytest_mailpit.chaos import Chaos
 from pytest_mailpit.client import MailpitClient
 from pytest_mailpit.config import DEFAULT_DOMAIN, DEFAULT_IMAGE, MailpitConfig, SMTPServer
@@ -345,6 +346,22 @@ def mailpit_inbox_factory(
 def mailpit_inbox(mailpit_inbox_factory: Callable[[], Inbox]) -> Inbox:
     """A unique email address for this test, and the messages sent to it."""
     return mailpit_inbox_factory()
+
+
+@pytest.fixture(scope="session")
+def mailpit_async(mailpit: MailpitClient) -> AsyncMailpitClient:
+    """The mailpit client for async tests: every method that asks Mailpit is awaited."""
+    return AsyncMailpitClient(mailpit)
+
+
+@pytest.fixture
+def mailpit_async_inbox(mailpit_inbox: Inbox) -> AsyncInbox:
+    """mailpit_inbox for async tests: the same address and cleanup, with methods to await.
+
+    Waiting yields to the event loop, so an application that sends the email
+    from the same loop keeps running.
+    """
+    return AsyncInbox(mailpit_inbox)
 
 
 @pytest.fixture

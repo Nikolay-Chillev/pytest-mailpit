@@ -4,7 +4,7 @@ A tiny FastAPI application that emails a login code in a background task, and te
 
 ```bash
 docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit
-pip install pytest-mailpit fastapi httpx2
+pip install pytest-mailpit fastapi httpx2 pytest-asyncio
 pytest
 ```
 
@@ -14,5 +14,6 @@ pytest
 - The `client` fixture in [`tests/test_login_code.py`](tests/test_login_code.py) overrides that dependency with `mailpit_smtp` (`MAILPIT_SMTP`, default `localhost:1025`; with `mailpit_container = true`, the container's SMTP port), FastAPI's usual way to change settings in tests.
 - `TestClient` runs background tasks before it returns the response, and Mailpit receives the email moments later; `mailpit_inbox.wait_for_message()` waits for it, so the test needs no sleeps.
 - `message.code()` finds the one-time code in the email.
+- [`tests/test_login_code_async.py`](tests/test_login_code_async.py) is the same login from an async test, with pytest-asyncio, httpx2's `AsyncClient` and `mailpit_async_inbox`, whose waiting yields to the event loop.
 
 Starlette's `TestClient` uses [httpx2](https://github.com/pydantic/httpx2), and warns when it has to fall back to httpx.

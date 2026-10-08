@@ -2,6 +2,7 @@
 
 from importlib.metadata import version
 
+from pytest_mailpit.aio import AsyncInbox, AsyncMailpitClient
 from pytest_mailpit.chaos import Chaos
 from pytest_mailpit.client import MailpitClient
 from pytest_mailpit.config import MailpitConfig, SMTPServer
@@ -34,6 +35,8 @@ __version__ = version("pytest-mailpit")
 
 __all__ = [
     "Address",
+    "AsyncInbox",
+    "AsyncMailpitClient",
     "Attachment",
     "Chaos",
     "ChaosTrigger",

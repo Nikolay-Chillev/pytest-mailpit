@@ -204,6 +204,25 @@ def test_invitation(app_client, mailpit_inbox, mailpit_inbox_factory):
     mailpit_inbox.assert_no_message()
 ```
 
+### Async tests
+
+`mailpit_async_inbox` is `mailpit_inbox` with methods to await, and `mailpit_async` is the client's. Use them when the application under test sends email from the test's event loop: a background task, or a server running in the same loop. The sync methods would block the loop while they wait, so the email would never be sent; the async ones yield to it between polls.
+
+```python
+import pytest
+
+
+@pytest.mark.asyncio
+async def test_login_code(async_client, mailpit_async_inbox):
+    await async_client.post("/login/code", json={"email": mailpit_async_inbox.address})
+
+    message = await mailpit_async_inbox.wait_for_message(subject="Your login code")
+
+    assert len(message.code()) == 6
+```
+
+They run on asyncio, as with pytest-asyncio or AnyIO's asyncio backend (not trio), and need no async HTTP library: each request runs in a worker thread through the sync client. The inbox is the same as `mailpit_inbox`, so cleanup and failure reports work the same way. Outside pytest, `AsyncMailpitClient("http://localhost:8025/")`, or `AsyncMailpitClient(MailpitClient(...))` for credentials and timeouts. The [FastAPI example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/fastapi) has an async test.
+
 ### Django
 
 Django's test runner, and pytest-django, keep sent email in memory (`django.core.mail.outbox`). `mailpit_django` sends the test's email over SMTP to Mailpit instead, so the test gets it as the recipient does, with the link and HTML checks and the browser helpers:
