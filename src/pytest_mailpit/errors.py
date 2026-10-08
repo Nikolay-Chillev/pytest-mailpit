@@ -27,3 +27,8 @@ class MailpitAPIError(MailpitError):
         self.detail = detail
         message = f"{method} {url} returned HTTP {status_code}"
         super().__init__(f"{message}: {detail}" if detail else message)
+
+
+class MailpitWarning(UserWarning):
+    """Something pytest-mailpit could work around but you should know about,
+    such as an unsupported Mailpit version or messages it could not delete."""
