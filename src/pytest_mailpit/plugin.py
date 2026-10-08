@@ -63,6 +63,11 @@ _REPORTS = pytest.StashKey[dict[str, pytest.TestReport]]()
 _INBOXES = pytest.StashKey[list[Inbox]]()
 # Whether a failed test kept its messages in Mailpit.
 _KEPT = pytest.StashKey[bool]()
+# Per test: mailpit_keep_on_failure as its mailpit_config says, whether its
+# teardown failed, and whether its first failure was reported already.
+_KEEP_ON_FAILURE = pytest.StashKey[bool]()
+_TEARDOWN_FAILED = pytest.StashKey[bool]()
+_REPORTED = pytest.StashKey[bool]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -225,15 +230,53 @@ def pytest_runtest_makereport(
     return report
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    # A fresh start for every run of a test, also a rerun by pytest-rerunfailures.
+    keys: tuple[pytest.StashKey[Any], ...] = (
+        _REPORTS,
+        _INBOXES,
+        _KEEP_ON_FAILURE,
+        _TEARDOWN_FAILED,
+        _REPORTED,
+    )
+    for key in keys:
+        if key in item.stash:
+            del item.stash[key]
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(
+    item: pytest.Item, nextitem: pytest.Item | None
+) -> Generator[None, None, None]:
+    # The inboxes are cleaned up after the whole teardown, not in a fixture's: a
+    # fixture that uses an inbox can still fail in its teardown, and then the
+    # messages are kept.
+    try:
+        return (yield)
+    except BaseException:
+        item.stash[_TEARDOWN_FAILED] = True
+        raise
+    finally:
+        _clean_up(item, last=nextitem is None)
+
+
 def _record(item: pytest.Item, report: pytest.TestReport) -> None:
-    """Remember the report for the inbox teardown; tag and report a failed test's messages."""
+    """Remember the report for the cleanup; tag and report the messages of a failed test.
+
+    The first failure counts, in the test's setup, call or teardown.
+    """
     item.stash.setdefault(_REPORTS, {})[report.when] = report
     inboxes = item.stash.get(_INBOXES, [])
-    if report.when != "call" or not report.failed or not inboxes:
+    if not report.failed or not inboxes or item.stash.get(_REPORTED, False):
         return
+    item.stash[_REPORTED] = True
     config = item.config.stash[_CONFIG]
+    keep = item.stash.get(_KEEP_ON_FAILURE, config.keep_on_failure)
+    if keep:
+        item.config.stash[_KEPT] = True
     # Tags only help find messages that are kept.
-    tag = failure_tag(item.nodeid) if config.keep_on_failure and config.tag_failures else None
+    tag = failure_tag(item.nodeid) if keep and config.tag_failures else None
     if tag is not None or config.report_messages:
         report_failure(
             item.config, report, inboxes, tag=tag, report_messages=config.report_messages
@@ -268,22 +311,24 @@ def mailpit_container(pytestconfig: pytest.Config) -> Iterator[Any]:
     without reverse DNS lookups. Under pytest-xdist every worker gets its own.
     """
     config = pytestconfig.stash[_CONFIG]
-    problem = None
     if not config.container:
-        problem = (
-            "The mailpit_container fixture needs mailpit_container = true, or --mailpit-container."
+        pytest.fail(
+            "The mailpit_container fixture needs mailpit_container = true, or --mailpit-container.",
+            pytrace=False,
         )
-    else:
-        try:
-            container = start_container(config.container_image)
-        except Exception as error:  # Docker not running, image missing, ...
-            problem = (
-                f"Could not start Mailpit in a Docker container ({_root_cause(error)}). "
-                "Is Docker running?"
-            )
+    unreachable = None
+    try:
+        container = start_container(config.container_image)
+    except Exception as error:  # Docker not running, image missing, ...
+        unreachable = (
+            f"Could not start Mailpit in a Docker container ({_root_cause(error)}). "
+            "Is Docker running?"
+        )
     # Fail outside the except block, so pytest does not print the chain of Docker errors.
-    if problem is not None:
-        pytest.fail(problem, pytrace=False)
+    if unreachable is not None:
+        if config.skip_if_unreachable:
+            pytest.skip(unreachable)
+        pytest.fail(unreachable, pytrace=False)
     try:
         yield container
     finally:
@@ -317,13 +362,15 @@ def mailpit(mailpit_config: MailpitConfig, pytestconfig: pytest.Config) -> Itera
 @pytest.fixture
 def mailpit_inbox_factory(
     mailpit: MailpitClient, mailpit_config: MailpitConfig, request: pytest.FixtureRequest
-) -> Iterator[Callable[[], Inbox]]:
+) -> Callable[[], Inbox]:
     """Creates inboxes for the test: call it once for each address the test needs.
 
     After the test, the messages sent to the inboxes are deleted, unless the
-    test failed and ``mailpit_keep_on_failure`` is on (the default).
+    test failed, in a fixture's setup or teardown too, and
+    ``mailpit_keep_on_failure`` is on (the default).
     """
-    created: list[Inbox] = []
+    inboxes = request.node.stash.setdefault(_INBOXES, [])
+    request.node.stash[_KEEP_ON_FAILURE] = mailpit_config.keep_on_failure
     timeout = _marker_timeout(request.node)
     if timeout is None:  # not "or": a timeout of 0 means check once
         timeout = mailpit_config.wait_timeout
@@ -332,26 +379,10 @@ def mailpit_inbox_factory(
     def create() -> Inbox:
         address = unique_address(request.node.nodeid, domain=mailpit_config.domain, worker=worker)
         inbox = Inbox(mailpit, address, wait_timeout=timeout)
-        created.append(inbox)
-        request.node.stash.setdefault(_INBOXES, []).append(inbox)
+        inboxes.append(inbox)
         return inbox
 
-    yield create
-
-    reports = request.node.stash.get(_REPORTS, {})
-    if mailpit_config.keep_on_failure and any(report.failed for report in reports.values()):
-        if created:
-            request.config.stash[_KEPT] = True
-        return
-    for inbox in created:
-        try:
-            inbox.clear()
-        except MailpitError as error:
-            warnings.warn(
-                f"Could not delete the messages to {inbox.address}: {error}",
-                MailpitWarning,
-                stacklevel=1,
-            )
+    return create
 
 
 @pytest.fixture
@@ -405,20 +436,23 @@ def mailpit_chaos(mailpit: MailpitClient, mailpit_config: MailpitConfig) -> Iter
 
     Mailpit must run with Chaos enabled: ``MP_ENABLE_CHAOS=true``, or
     ``mailpit_container = true``. The errors apply to every message Mailpit
-    receives; after the test, the triggers Mailpit had before are restored.
+    receives. After the test, each trigger the test changed gets back the value
+    it had before, unless something else changed it in the meantime.
     """
     original = _chaos_triggers(mailpit)
     if os.environ.get("PYTEST_XDIST_WORKER") and not mailpit_config.container:
         warnings.warn(
             "mailpit_chaos makes Mailpit reject the messages of every pytest-xdist worker, "
-            "not only this test's. Give each worker its own Mailpit with "
-            "mailpit_container = true, or run the Chaos tests in a run without -n.",
+            "not only this test's, and Chaos tests of two workers that change the same "
+            "trigger at once can leave it on after the run. Give each worker its own "
+            "Mailpit with mailpit_container = true, or run the Chaos tests without -n.",
             MailpitWarning,
             stacklevel=1,
         )
-    yield Chaos(mailpit)
+    chaos = Chaos(mailpit)
+    yield chaos
     try:
-        mailpit.set_chaos(original)
+        chaos._restore(original)
     except MailpitError as error:
         warnings.warn(
             f"Could not restore Mailpit's Chaos triggers, so it may still reject messages: {error}",
@@ -497,6 +531,28 @@ def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
             raise
     # Fail outside the except block, so pytest does not print the API error above the message.
     pytest.fail(problem, pytrace=False)
+
+
+def _clean_up(item: pytest.Item, *, last: bool) -> None:
+    """After a test's teardown: delete its messages, or keep them if it failed."""
+    inboxes = item.stash.get(_INBOXES, [])
+    failed = item.stash.get(_TEARDOWN_FAILED, False) or any(
+        report.failed for report in item.stash.get(_REPORTS, {}).values()
+    )
+    if inboxes and failed and item.stash.get(_KEEP_ON_FAILURE, True):
+        item.config.stash[_KEPT] = True
+        return
+    for inbox in inboxes:
+        try:
+            inbox.clear()
+        except MailpitError as error:
+            if last and isinstance(error, MailpitConnectionError):
+                continue  # Mailpit went with the end of the session, e.g. its container
+            warnings.warn(
+                f"Could not delete the messages to {inbox.address}: {error}",
+                MailpitWarning,
+                stacklevel=1,
+            )
 
 
 def _warn_if_nearly_full(client: MailpitClient) -> None:
