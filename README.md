@@ -30,7 +30,7 @@ pytest-mailpit replaces that glue:
 - **A unique address for every test.** Tests never see each other's messages, in parallel too, and after a test only its own messages are deleted.
 - **Waiting instead of sleeping.** Wait for one message, for several, or check that none arrives, with a timeout. Addresses match exactly: Mailpit's search matches substrings, so `a@example.com` would also find `ba@example.com`.
 - **Links and codes.** `message.link("/reset/")` and `message.code()` instead of regular expressions, with HTML entities decoded and dates, prices and phone numbers not mistaken for codes.
-- **Failures that explain themselves.** A failure says what was expected and what arrived instead, and points at your test, not at the plugin:
+- **Failures that explain themselves.** A failure says what was expected and what arrived instead, and points at your test, not at the plugin. The failed test's emails are attached to Allure and pytest-html reports.
 
   ```
   >       mailpit_inbox.wait_for_message(subject="Reset your password")
@@ -149,6 +149,7 @@ Command line options win over environment variables, which win over ini settings
 | How often to check, in seconds | | | `mailpit_poll_interval` | `0.5` |
 | Domain of the inbox addresses | | | `mailpit_domain` | `example.com` |
 | Keep a failed test's messages | | | `mailpit_keep_on_failure` | `true` |
+| List and attach a failed test's messages in reports | | | `mailpit_report_messages` | `true` |
 | When Mailpit cannot be reached: `fail` or `skip` | | | `mailpit_unreachable` | `fail` |
 
 The password is read from the environment only, so it stays out of files under version control. `example.com` is reserved for examples, so nothing ever reaches a real person, and unlike `.test` it passes the email validation of most applications.
@@ -181,6 +182,13 @@ Messages to pytest-3f9a2c-7b1e4d9a@example.com (1):
   09:14:03        pytest-3f9a2c-7b1e4d9a@example.com  Welcome to the shop
 Mailpit: http://localhost:8025/
 ```
+
+With [Allure](https://allurereport.org/docs/pytest/) (`--alluredir`) or [pytest-html](https://pytest-html.readthedocs.io/) (`--html`), the emails themselves are attached too, so a CI report keeps them after Mailpit is gone:
+
+- **Allure**: the table above, each email as HTML (or text when it has no HTML part), and its source as an `.eml` file.
+- **pytest-html**: a link to each email in Mailpit's web UI, and the email itself, shown in a sandboxed frame that keeps its styles and scripts out of the report.
+
+The ten newest emails of each inbox are attached, and only when the test fails. Emails can hold tokens or personal data; set `mailpit_report_messages = false` to keep them out of reports and CI artifacts.
 
 If Mailpit is not running, the tests that need it say what to do instead of showing a stack of connection errors:
 

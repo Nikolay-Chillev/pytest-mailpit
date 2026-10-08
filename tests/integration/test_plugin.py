@@ -1,5 +1,6 @@
 """The plugin end to end: inner pytest sessions that send real email to a real Mailpit."""
 
+import json
 import uuid
 
 import pytest
@@ -119,3 +120,28 @@ def test_a_failed_test_keeps_its_messages_and_shows_them(
         ]
     )
     assert messages_to(client, domain) == ["Welcome"]
+
+
+def test_a_failed_tests_real_email_lands_in_allure_and_pytest_html(
+    pytester: pytest.Pytester, domain: str
+) -> None:
+    pytester.makepyfile(
+        """
+        def test_wrong_email(mailpit_inbox, send):
+            send(mailpit_inbox.address, "Order 1001 confirmed", "Thank you for your order.")
+
+            mailpit_inbox.wait_for_message(subject="Reset your password", timeout=1)
+        """
+    )
+
+    result = pytester.runpytest("--alluredir=allure", "--html=report.html", "--self-contained-html")
+
+    result.assert_outcomes(failed=1)
+    [allure_result] = (pytester.path / "allure").glob("*-result.json")
+    attachments = json.loads(allure_result.read_text("utf-8"))["attachments"]
+    names = [attachment["name"] for attachment in attachments]
+    assert names[1:] == ["Email: Order 1001 confirmed", "Email source: Order 1001 confirmed"]
+    source = (pytester.path / "allure" / attachments[2]["source"]).read_bytes()
+    assert b"Subject: Order 1001 confirmed" in source
+    report = (pytester.path / "report.html").read_text("utf-8")
+    assert "Mailpit: Order 1001 confirmed" in report

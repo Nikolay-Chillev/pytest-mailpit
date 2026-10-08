@@ -16,6 +16,7 @@ Wait timeout (s)       ``--mailpit-timeout``   ``MAILPIT_WAIT_TIMEOUT``  ``mailp
 Poll interval (s)                                                        ``mailpit_poll_interval``
 Inbox domain                                                             ``mailpit_domain``
 Keep failed messages                                                     ``mailpit_keep_on_failure``
+Report failed messages                                                   ``mailpit_report_messages``
 When unreachable                                                         ``mailpit_unreachable``
 =====================  ======================  ========================  ==========================
 """
@@ -28,6 +29,7 @@ from collections.abc import Callable, Generator, Iterator, Mapping
 import pytest
 
 from pytest_mailpit._http import _without_credentials
+from pytest_mailpit._reporting import report_failure
 from pytest_mailpit.client import MailpitClient
 from pytest_mailpit.config import DEFAULT_DOMAIN, MailpitConfig
 from pytest_mailpit.errors import (
@@ -77,6 +79,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addini(
         "mailpit_keep_on_failure",
         "Keep the messages of a failed test in Mailpit.",
+        type="bool",
+        default=True,
+    )
+    parser.addini(
+        "mailpit_report_messages",
+        "List a failed test's messages in its report, and attach them to Allure and pytest-html.",
         type="bool",
         default=True,
     )
@@ -139,6 +147,7 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         ),
         domain=domain.strip(),
         keep_on_failure=bool(config.getini("mailpit_keep_on_failure")),
+        report_messages=bool(config.getini("mailpit_report_messages")),
         skip_if_unreachable=unreachable == "skip",
     )
 
@@ -159,14 +168,14 @@ def pytest_runtest_makereport(
 def _record(item: pytest.Item, report: pytest.TestReport) -> None:
     """Remember the report for the inbox teardown, and add the inbox's messages to failures."""
     item.stash.setdefault(_REPORTS, {})[report.when] = report
-    if report.when != "call" or not report.failed:
-        return
-    for inbox in item.stash.get(_INBOXES, []):
-        try:
-            text = inbox.describe()
-        except MailpitError as error:
-            text = f"Could not list the messages to {inbox.address}: {error}"
-        report.sections.append((f"Mailpit messages to {inbox.address}", text))
+    inboxes = item.stash.get(_INBOXES, [])
+    if (
+        report.when == "call"
+        and report.failed
+        and inboxes
+        and item.config.stash[_CONFIG].report_messages
+    ):
+        report_failure(item.config, report, inboxes)
 
 
 # Fixtures

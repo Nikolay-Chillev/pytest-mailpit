@@ -117,9 +117,13 @@ class Inbox:
         """Delete the messages sent to the address, and no others."""
         self.client.delete_messages(summary.id for summary in self.messages())
 
-    def describe(self) -> str:
-        """The messages sent to the address, as a table, for a test report."""
-        found = self.messages()
+    def describe(self, found: list[MessageSummary] | None = None) -> str:
+        """The messages sent to the address, as a table, for a test report.
+
+        ``found`` are the inbox's messages if they were fetched already.
+        """
+        if found is None:
+            found = self.messages()
         if not found:
             return f"No messages to {self.address}.\nMailpit: {self.client.url}"
         return (

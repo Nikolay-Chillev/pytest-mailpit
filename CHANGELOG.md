@@ -4,6 +4,14 @@ All notable changes to pytest-mailpit are listed here. The project follows
 [Semantic Versioning](https://semver.org/); before 1.0 the API may still change
 in any release.
 
+## [Unreleased]
+
+### Added
+
+- A failed test's emails are attached to Allure (`--alluredir`) and pytest-html (`--html`) reports, so CI reports keep them after Mailpit is gone. Allure gets each email as HTML or text and its source as an `.eml` file; pytest-html gets a link to the email in Mailpit and the email in a sandboxed frame. The ten newest emails of each inbox are attached.
+- `mailpit_report_messages`: set it to `false` to keep a failed test's emails out of its report and attachments.
+- `MailpitClient.view_url()`: the page of a message in Mailpit's web UI.
+
 ## [0.1.0a1] - 2026-10-08
 
 The first release.
@@ -22,4 +30,5 @@ The first release.
 - **Links and one-time codes** found in a message's HTML and text.
 - **`MailpitClient`**, a typed client for Mailpit's API: search, messages, headers, raw source, parts, deleting, read status and server time; it works under a web root, with basic auth and custom TLS verification.
 
+[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.1.0a1...HEAD
 [0.1.0a1]: https://github.com/Nikolay-Chillev/pytest-mailpit/releases/tag/v0.1.0a1
