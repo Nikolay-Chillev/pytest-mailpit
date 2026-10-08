@@ -33,7 +33,7 @@ MESSAGE: dict[str, Any] = {
     "ListUnsubscribe": {
         "Header": "<mailto:unsubscribe@shop.example.test>, <https://shop.example.test/u/1>",
         "HeaderPost": "List-Unsubscribe=One-Click",
-        "Links": ["unsubscribe@shop.example.test", "https://shop.example.test/u/1"],
+        "Links": ["mailto:unsubscribe@shop.example.test", "https://shop.example.test/u/1"],
         "Errors": "",
     },
     "Date": "2026-10-07T14:22:33+03:00",

@@ -67,13 +67,14 @@ def test_message_parses_bodies_attachments_and_list_unsubscribe() -> None:
             content_type="application/pdf",
             size=1234,
             checksums={"MD5": "0123456789abcdef0123456789abcdef"},
+            message_id="Aa1Bb2Cc3Dd4Ee5Ff6Gg7H",
         ),
     )
     assert message.inline == ()
     assert message.list_unsubscribe == ListUnsubscribe(
         header="<mailto:unsubscribe@shop.example.test>, <https://shop.example.test/u/1>",
         header_post="List-Unsubscribe=One-Click",
-        links=("unsubscribe@shop.example.test", "https://shop.example.test/u/1"),
+        links=("mailto:unsubscribe@shop.example.test", "https://shop.example.test/u/1"),
     )
 
 
