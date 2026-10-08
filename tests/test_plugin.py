@@ -590,6 +590,23 @@ def test_marker_sets_the_inbox_timeout(
     pytester.runpytest("--strict-markers").assert_outcomes(passed=2)
 
 
+def test_a_marker_timeout_of_zero_checks_once(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    pytester.makeini("[pytest]\nmailpit_wait_timeout = 30\n")
+    pytester.makepyfile(
+        """
+        import pytest
+
+        @pytest.mark.mailpit(timeout=0)
+        def test_sent_already(mailpit_inbox):
+            assert mailpit_inbox.wait_timeout == 0
+        """
+    )
+
+    pytester.runpytest().assert_outcomes(passed=1)
+
+
 @pytest.mark.parametrize("timeout", ["'soon'", "-1", "True"])
 def test_marker_timeout_must_be_seconds(
     pytester: pytest.Pytester, server: responses.RequestsMock, timeout: str

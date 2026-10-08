@@ -1,8 +1,11 @@
+import warnings
 from collections.abc import Iterator
 
 import pytest
+import requests
 import responses
 from responses import matchers
+from urllib3.exceptions import InsecureRequestWarning
 
 from pytest_mailpit import MailpitAPIError, MailpitClient, MailpitConnectionError
 from tests import samples
@@ -382,3 +385,92 @@ def test_a_redirect_keeps_credentials_out_of_the_message(mocked: responses.Reque
 
     assert "secret" not in str(error.value)
     assert "it redirects to https://mailpit.test/;" in str(error.value)
+
+
+# TLS and timeouts, as they reach requests
+
+
+class Sent:
+    """Stands in for Session.send: records the settings of each request."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, *, raises: Exception | None = None) -> None:
+        self.settings: list[dict[str, object]] = []
+        self.raises = raises
+        monkeypatch.setattr(requests.Session, "send", self.send)
+
+    def send(self, request: requests.PreparedRequest, **settings: object) -> requests.Response:
+        self.settings.append(settings)
+        if self.raises is not None:
+            raise self.raises
+        response = requests.Response()
+        response.status_code, response._content = 200, b"{}"
+        response.url, response.request = request.url or "", request
+        return response
+
+
+@pytest.mark.parametrize("verify", [False, "C:/mailpit-ca.pem"])
+def test_the_tls_setting_wins_over_a_ca_bundle_in_the_environment(
+    monkeypatch: pytest.MonkeyPatch, verify: bool | str
+) -> None:
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "C:/corporate-ca.pem")
+    sent = Sent(monkeypatch)
+
+    MailpitClient(URL, verify=verify).messages()
+
+    assert [settings["verify"] for settings in sent.settings] == [verify]
+
+
+def test_default_verification_uses_the_ca_bundle_of_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", "C:/corporate-ca.pem")
+    sent = Sent(monkeypatch)
+
+    MailpitClient(URL).messages()
+
+    assert [settings["verify"] for settings in sent.settings] == ["C:/corporate-ca.pem"]
+
+
+def test_no_tls_warning_when_verification_is_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    def send(self: requests.Session, request: requests.PreparedRequest, **settings: object) -> None:
+        warnings.warn("Unverified HTTPS request", InsecureRequestWarning, stacklevel=1)
+        raise requests.ConnectionError("stop here")
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(MailpitConnectionError):
+            MailpitClient(URL, verify=False).messages()
+
+    with pytest.warns(InsecureRequestWarning), pytest.raises(MailpitConnectionError):
+        MailpitClient(URL).messages()
+
+
+def test_link_and_html_checks_wait_longer(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent = Sent(monkeypatch)
+    client = MailpitClient(URL, timeout=5)
+
+    client.messages()
+    client.check_links("m1")
+    client.check_html("m1")
+
+    assert [settings["timeout"] for settings in sent.settings] == [5, 120, 120]
+
+
+def test_a_slow_answer_is_not_called_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    Sent(monkeypatch, raises=requests.ReadTimeout("Read timed out. (read timeout=120)"))
+
+    with pytest.raises(MailpitConnectionError) as error:
+        MailpitClient(URL).check_links("m1")
+
+    assert str(error.value) == (
+        f"Mailpit at {URL} did not answer GET api/v1/message/m1/link-check within 120 s"
+    )
+
+
+# A single string where a list belongs
+
+
+def test_tags_must_be_a_list(client: MailpitClient) -> None:
+    with pytest.raises(TypeError, match="Expected a list of tags, got a single string"):
+        client.set_tags(["m1"], "urgent")

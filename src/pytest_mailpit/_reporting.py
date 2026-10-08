@@ -123,7 +123,10 @@ def _add_to_pytest_html(report: pytest.TestReport, inbox: Inbox, emails: list[_E
     for email in emails:
         message = email.message
         report_extras.append(
-            extras.url(inbox.client.view_url(message.id), name=f"Mailpit: {message.subject}")
+            # pytest-html puts the name into the report as HTML.
+            extras.url(
+                inbox.client.view_url(message.id), name=f"Mailpit: {html.escape(message.subject)}"
+            )
         )
         report_extras.append(extras.html(_email_card(message)))
     report.extras = report_extras  # type: ignore[attr-defined]

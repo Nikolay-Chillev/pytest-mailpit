@@ -194,6 +194,14 @@ def test_ignored_links_are_not_held_against_the_message(
     assert message.assert_links_work(ignore=["social.example"]).errors == 1
 
 
+def test_one_string_to_ignore_is_refused_before_it_hides_every_broken_link(
+    mocked: responses.RequestsMock, message: Message
+) -> None:
+    # "social.example" as characters: every link contains one of them.
+    with pytest.raises(TypeError, match=r"ignore=\['linkedin.com'\]"):
+        message.assert_links_work(ignore="social.example")
+
+
 def test_blocked_internal_links_get_a_hint(
     mocked: responses.RequestsMock, message: Message
 ) -> None:

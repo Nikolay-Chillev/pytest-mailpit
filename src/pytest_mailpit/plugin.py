@@ -324,7 +324,9 @@ def mailpit_inbox_factory(
     test failed and ``mailpit_keep_on_failure`` is on (the default).
     """
     created: list[Inbox] = []
-    timeout = _marker_timeout(request.node) or mailpit_config.wait_timeout
+    timeout = _marker_timeout(request.node)
+    if timeout is None:  # not "or": a timeout of 0 means check once
+        timeout = mailpit_config.wait_timeout
     worker = os.environ.get("PYTEST_XDIST_WORKER")
 
     def create() -> Inbox:

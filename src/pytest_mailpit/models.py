@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
+from pytest_mailpit._args import strings
 from pytest_mailpit.errors import MailpitAssertionError
 from pytest_mailpit.extract import Link, filter_links, find_codes, find_links, html_to_text
 
@@ -489,8 +490,8 @@ class Message:
         With ``follow_redirects`` the status of the final page counts.
         """
         __tracebackhide__ = True
+        ignored = strings(ignore, "parts of links to ignore, e.g. ignore=['linkedin.com']")
         result = self.check_links(follow_redirects=follow_redirects)
-        ignored = tuple(ignore)
         broken = [link for link in result.broken if not any(part in link.url for part in ignored)]
         if not broken:
             return result
