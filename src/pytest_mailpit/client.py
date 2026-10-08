@@ -9,6 +9,7 @@ from types import TracebackType
 from typing import Self
 from urllib.parse import urljoin
 
+from pytest_mailpit._django import outbox_hint
 from pytest_mailpit._http import Transport
 from pytest_mailpit._report import message_table
 from pytest_mailpit.errors import MailpitAssertionError, MailpitError
@@ -271,9 +272,10 @@ class MailpitClient:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 arrived = f"{len(found)} arrived" if found else "none arrived"
+                hint = outbox_hint()
                 raise MailpitAssertionError(
                     f"Expected {expected} within {timeout:g}s, {arrived}.\n"
-                    f"{self._what_arrived(criteria)}"
+                    f"{self._what_arrived(criteria)}" + (f"\n{hint}" if hint else "")
                 )
             time.sleep(min(self.poll_interval, remaining))
 
