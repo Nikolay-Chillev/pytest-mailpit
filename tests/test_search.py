@@ -21,6 +21,7 @@ def test_quote_rejects_empty_values(value: str) -> None:
 
 def test_build_query_maps_every_criterion_to_mailpit_filters() -> None:
     query = build_query(
+        addressed="any@example.test",
         to="a@example.test",
         sender="shop@example.test",
         cc="c@example.test",
@@ -32,7 +33,8 @@ def test_build_query_maps_every_criterion_to_mailpit_filters() -> None:
     )
 
     assert query == (
-        'to:"a@example.test" from:"shop@example.test" cc:"c@example.test" bcc:"b@example.test" '
+        'addressed:"any@example.test" to:"a@example.test" from:"shop@example.test" '
+        'cc:"c@example.test" bcc:"b@example.test" '
         'reply-to:"r@example.test" subject:"Order 1001" message-id:"m-1@example.test" tag:"orders"'
     )
 
