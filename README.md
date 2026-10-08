@@ -357,6 +357,8 @@ jobs:
 
 - [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host, and how the two find each other.
 - [Django](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django): a sign-up email with a confirmation link, read from Mailpit with `mailpit_django` and followed with Django's test client.
+- [Flask](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/flask): a password reset link sent with Flask-Mail, which sends nothing in `TESTING` mode unless told to.
+- [FastAPI](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/fastapi): a login code sent in a background task, with the SMTP settings as a dependency the test overrides.
 - [Testcontainers](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers): `mailpit_container = true`, and the plugin starts Mailpit for the session; or start your own container and point the plugin at it.
 - [Migrating from MailHog](https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/docs/migrating-from-mailhog.md): the container settings, the API and the message fields, call by call.
 

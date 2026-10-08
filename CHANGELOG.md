@@ -13,7 +13,7 @@ in any release.
 
 ### Documentation
 
-- A Django example, run in CI with Django 5.2 and 6.1.
+- Django, Flask and FastAPI examples, run in CI on every change; Django with 5.2 and 6.1.
 
 ## [0.3.0] - 2026-10-08
 
