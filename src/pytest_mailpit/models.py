@@ -5,10 +5,17 @@ Mailpit versions added have defaults and unknown fields are ignored, so the
 models parse responses from every supported server version.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Self
+
+from pytest_mailpit.errors import MailpitAssertionError
+from pytest_mailpit.extract import Link, filter_links, find_codes, find_links, html_to_text
+
+# Longest excerpt of a message body shown in a failure.
+_EXCERPT_CHARS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +168,102 @@ class Message:
             list_unsubscribe=ListUnsubscribe.from_api(data.get("ListUnsubscribe")),
             username=data.get("Username") or "",
         )
+
+    def links(
+        self,
+        contains: str | None = None,
+        *,
+        pattern: str | re.Pattern[str] | None = None,
+        text: str | None = None,
+    ) -> list[str]:
+        """The http(s) links in the message, from the HTML and the text part.
+
+        ``contains`` keeps the URLs that contain it, ``pattern`` those matching
+        a regular expression, and ``text`` the HTML links whose visible text
+        contains it (case-insensitive).
+        """
+        found = filter_links(self._links(), contains=contains, pattern=pattern, text=text)
+        return [link.url for link in found]
+
+    def link(
+        self,
+        contains: str | None = None,
+        *,
+        pattern: str | re.Pattern[str] | None = None,
+        text: str | None = None,
+    ) -> str:
+        """The one link matching the filters of :meth:`links`.
+
+        Raises MailpitAssertionError, a test failure, unless exactly one matches.
+        """
+        every_link = self._links()
+        found = filter_links(every_link, contains=contains, pattern=pattern, text=text)
+        if len(found) == 1:
+            return found[0].url
+        filters = _describe_filters(contains=contains, pattern=pattern, text=text)
+        lines = [f"Expected one link{filters} in {self._describe()}, found {len(found)}."]
+        if every_link:
+            lines.append("Links in the message:")
+            lines += [f"  {_describe_link(link)}" for link in every_link]
+        else:
+            lines.append("The message has no http(s) links.")
+        raise MailpitAssertionError("\n".join(lines))
+
+    def codes(self, pattern: str | re.Pattern[str] | None = None) -> list[str]:
+        """One-time codes in the message, the most likely first.
+
+        Without ``pattern``, a code is a run of 4-8 digits near words such as
+        "code", "OTP", "verification" or "код". With ``pattern``, every match of
+        the regular expression (its first group, if it has one).
+        """
+        return find_codes(self.text, self.html, pattern=pattern)
+
+    def code(self, pattern: str | re.Pattern[str] | None = None) -> str:
+        """The one code :meth:`codes` finds.
+
+        Raises MailpitAssertionError, a test failure, unless exactly one is found.
+        """
+        found = self.codes(pattern)
+        if len(found) == 1:
+            return found[0]
+        what = f"code matching {pattern!r}" if pattern is not None else "one-time code"
+        lines = [f"Expected one {what} in {self._describe()}, found {len(found)}"]
+        if found:
+            lines[0] += f": {', '.join(found)}."
+            if pattern is None:
+                lines.append("Pass pattern= to say which one is the code.")
+        else:
+            lines[0] += "."
+            body = " ".join((self.text if self.text.strip() else html_to_text(self.html)).split())
+            if len(body) > _EXCERPT_CHARS:
+                body = body[:_EXCERPT_CHARS] + "..."
+            lines.append(f"Text of the message: {body!r}")
+        raise MailpitAssertionError("\n".join(lines))
+
+    def _links(self) -> list[Link]:
+        return find_links(self.text, self.html)
+
+    def _describe(self) -> str:
+        recipients = ", ".join(address.address for address in self.to) or "no one"
+        return f"message {self.subject!r} to {recipients}"
+
+
+def _describe_filters(
+    *, contains: str | None, pattern: str | re.Pattern[str] | None, text: str | None
+) -> str:
+    parts = []
+    if contains is not None:
+        parts.append(f"containing {contains!r}")
+    if pattern is not None:
+        shown = pattern.pattern if isinstance(pattern, re.Pattern) else pattern
+        parts.append(f"matching {shown!r}")
+    if text is not None:
+        parts.append(f"with text {text!r}")
+    return f" {' and '.join(parts)}" if parts else ""
+
+
+def _describe_link(link: Link) -> str:
+    return f"{link.url}  (text: {link.text!r})" if link.text else link.url
 
 
 @dataclass(frozen=True, slots=True)

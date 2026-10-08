@@ -3,7 +3,12 @@
 from importlib.metadata import version
 
 from pytest_mailpit.client import MailpitClient
-from pytest_mailpit.errors import MailpitAPIError, MailpitConnectionError, MailpitError
+from pytest_mailpit.errors import (
+    MailpitAPIError,
+    MailpitAssertionError,
+    MailpitConnectionError,
+    MailpitError,
+)
 from pytest_mailpit.models import (
     Address,
     Attachment,
@@ -22,6 +27,7 @@ __all__ = [
     "Attachment",
     "ListUnsubscribe",
     "MailpitAPIError",
+    "MailpitAssertionError",
     "MailpitClient",
     "MailpitConnectionError",
     "MailpitError",
