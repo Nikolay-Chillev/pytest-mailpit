@@ -133,6 +133,26 @@ def test_newsletter_can_be_unsubscribed_in_one_click(app_client, mailpit_inbox):
 
 `message.list_unsubscribe` holds the header as Mailpit parsed it: `header`, `header_post`, `http_link`, `mailto_link`, `one_click` and `errors`.
 
+#### Quality checks
+
+Mailpit can check a message the way a careful reviewer would, and pytest-mailpit turns that into assertions:
+
+```python
+message.assert_links_work()  # no link answers with an error status, or not at all
+message.assert_links_work(ignore=["linkedin.com"])  # sites that refuse automated requests
+message.assert_html_support(at_least=90)  # % of the HTML and CSS that email clients support
+```
+
+A failure lists the broken links with their status, or the HTML and CSS features that hold the message back, with their pages on [caniemail.com](https://www.caniemail.com/):
+
+```
+2 of 5 links in message 'Welcome' to pytest-3f9a2c-7b1e4d9a@example.com are broken:
+  404 Not Found  https://shop.example.com/old-page
+  no such host   https://nowhere.invalid/
+```
+
+Mailpit sends a HEAD request to every link, so the links must be reachable from where Mailpit runs. Since Mailpit 1.29.2 it refuses to check private and internal addresses, such as `localhost` or a Docker service; to check links to the application under test, start Mailpit with `MP_ALLOW_INTERNAL_HTTP_REQUESTS=true`. `message.check_links()` and `message.check_html()` return the full results without asserting.
+
 ### More than one address
 
 `mailpit_inbox_factory` creates another inbox each time it is called:
@@ -278,10 +298,10 @@ pip install -e . --group dev
 pytest
 ```
 
-The integration tests need a running Mailpit:
+The integration tests need a running Mailpit that may check links to internal addresses:
 
 ```bash
-docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit
+docker run -d -p 8025:8025 -p 1025:1025 -e MP_ALLOW_INTERNAL_HTTP_REQUESTS=true axllent/mailpit
 pytest -m integration
 ```
 

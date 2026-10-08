@@ -12,7 +12,15 @@ from urllib.parse import urljoin
 from pytest_mailpit._http import Transport
 from pytest_mailpit._report import message_table
 from pytest_mailpit.errors import MailpitAssertionError, MailpitError
-from pytest_mailpit.models import Attachment, Message, MessageList, MessageSummary, ServerInfo
+from pytest_mailpit.models import (
+    Attachment,
+    HTMLCheck,
+    LinkCheck,
+    Message,
+    MessageList,
+    MessageSummary,
+    ServerInfo,
+)
 from pytest_mailpit.search import build_query
 
 DEFAULT_URL = "http://localhost:8025/"
@@ -140,7 +148,8 @@ class MailpitClient:
 
         Mailpit marks a message as read when it is fetched this way.
         """
-        return Message.from_api(self._http.get_json(f"api/v1/message/{message_id}"))
+        data = self._http.get_json(f"api/v1/message/{message_id}")
+        return Message.from_api(data, client=self)
 
     def get_headers(self, message_id: str) -> dict[str, list[str]]:
         """All headers of a message; a header can occur more than once."""
@@ -154,6 +163,17 @@ class MailpitClient:
     def get_part(self, message_id: str, part_id: str) -> bytes:
         """The content of an attachment or inline part, by its ``part_id``."""
         return self._http.request("GET", f"api/v1/message/{message_id}/part/{part_id}").content
+
+    def check_links(self, message_id: str, *, follow_redirects: bool = False) -> LinkCheck:
+        """Mailpit's link check: a HEAD request to every link in the message."""
+        params = {"follow": "true"} if follow_redirects else None
+        return LinkCheck.from_api(
+            self._http.get_json(f"api/v1/message/{message_id}/link-check", params=params)
+        )
+
+    def check_html(self, message_id: str) -> HTMLCheck:
+        """Mailpit's HTML check: how well email clients support the message's HTML and CSS."""
+        return HTMLCheck.from_api(self._http.get_json(f"api/v1/message/{message_id}/html-check"))
 
     def get_attachment(self, attachment: Attachment) -> bytes:
         """The content of an attachment or inline part of a message this client fetched."""

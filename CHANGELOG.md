@@ -6,6 +6,12 @@ in any release.
 
 ## [Unreleased]
 
+### Added
+
+- `Message.assert_links_work()`: fails the test if a link in the message answers with an error status or not at all, using Mailpit's link check; `ignore` skips links such as social networks, and a hint explains Mailpit's refusal to check internal addresses.
+- `Message.assert_html_support(at_least=...)`: fails the test unless email clients support enough of the message's HTML and CSS, using Mailpit's HTML check (caniemail.com data), and lists the worst problems.
+- `Message.check_links()`, `Message.check_html()`, `MailpitClient.check_links()` and `MailpitClient.check_html()` return the full results: `LinkCheck`, `LinkStatus`, `HTMLCheck` and `HTMLWarning`. A message fetched by a client remembers it for these checks.
+
 ## [0.2.0] - 2026-10-08
 
 ### Added

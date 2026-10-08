@@ -75,6 +75,8 @@ jobs:
         env:
           # Reverse DNS lookups of the SMTP client can delay every message by seconds in containers.
           MP_SMTP_DISABLE_RDNS: "true"
+          # The link check tests link to Mailpit itself, an internal address (Mailpit 1.29.2+).
+          MP_ALLOW_INTERNAL_HTTP_REQUESTS: "true"
     env:
       MAILPIT_URL: http://localhost:8025/
       MAILPIT_SMTP: localhost:1025
