@@ -507,3 +507,27 @@ def test_marker_without_timeout_uses_the_default(
     )
 
     pytester.runpytest().assert_outcomes(passed=1)
+
+
+def test_failures_point_at_the_test_not_at_pytest_mailpit(
+    pytester: pytest.Pytester, server: responses.RequestsMock
+) -> None:
+    pytester.makepyfile(
+        """
+        def test_wait(mailpit_inbox):
+            mailpit_inbox.assert_no_message(within=0)
+
+        def test_link(mailpit_inbox):
+            message = mailpit_inbox.wait_for_message()
+            message.link("/does-not-exist/")
+        """
+    )
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(failed=2)
+    output = result.stdout.str()
+    assert "mailpit_inbox.assert_no_message(within=0)" in output
+    assert 'message.link("/does-not-exist/")' in output
+    for module in ("client.py", "inbox.py", "models.py"):
+        assert f"pytest_mailpit{__import__('os').sep}{module}" not in output

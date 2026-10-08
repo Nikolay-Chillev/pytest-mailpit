@@ -60,6 +60,7 @@ class Inbox:
         address, and ``query`` adds a Mailpit search. Fails the test if none
         arrives within ``timeout`` seconds, or if more than one matches.
         """
+        __tracebackhide__ = True
         return self.client.wait_for_message(
             query,
             recipient=self.address,
@@ -78,6 +79,7 @@ class Inbox:
         timeout: float | None = None,
     ) -> list[Message]:
         """Wait until exactly ``count`` matching messages have arrived; oldest first."""
+        __tracebackhide__ = True
         return self.client.wait_for_messages(
             count,
             query,
@@ -96,6 +98,7 @@ class Inbox:
         within: float = 2.0,
     ) -> None:
         """Fail the test if a matching message arrives within ``within`` seconds."""
+        __tracebackhide__ = True
         self.client.assert_no_message(
             query, recipient=self.address, sender=sender, subject=subject, within=within
         )

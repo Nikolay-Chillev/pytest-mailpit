@@ -196,6 +196,7 @@ class Message:
 
         Raises MailpitAssertionError, a test failure, unless exactly one matches.
         """
+        __tracebackhide__ = True
         every_link = self._links()
         found = filter_links(every_link, contains=contains, pattern=pattern, text=text)
         if len(found) == 1:
@@ -223,6 +224,7 @@ class Message:
 
         Raises MailpitAssertionError, a test failure, unless exactly one is found.
         """
+        __tracebackhide__ = True
         found = self.codes(pattern)
         if len(found) == 1:
             return found[0]
