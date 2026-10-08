@@ -1,6 +1,7 @@
 """Attachments and List-Unsubscribe of real emails, as a real Mailpit parses them."""
 
 import hashlib
+import re
 
 import pytest
 
@@ -66,8 +67,11 @@ def test_an_invalid_list_unsubscribe_header_is_reported_with_mailpits_reason(
     )
     message = client.wait_for_message(recipient=recipient)
 
+    # Mailpit's own reason, quoted: without <...> it finds no link at all.
+    reason = '"https://shop.example.com/u/7" no valid unsubscribe links found'
     with pytest.raises(
-        MailpitAssertionError, match=r"has an invalid List-Unsubscribe header: .*<>"
+        MailpitAssertionError,
+        match=re.escape(f"has an invalid List-Unsubscribe header: {reason}."),
     ):
         message.unsubscribe_link()
 
