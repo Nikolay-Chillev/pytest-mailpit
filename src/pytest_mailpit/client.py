@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from types import TracebackType
-from typing import Self
+from typing import NamedTuple, Self
 from urllib.parse import urljoin
 
 from pytest_mailpit._django import outbox_hint
@@ -254,30 +254,12 @@ class MailpitClient:
         ``timeout`` seconds or if more than ``count`` match.
         """
         __tracebackhide__ = True
-        if count < 1:
-            raise ValueError("count must be at least 1; use assert_no_message to expect none")
-        criteria = _Criteria.build(query, recipient, sender, subject, tag, since)
-        timeout = self.wait_timeout if timeout is None else timeout
-        _require_not_negative(timeout=timeout)
-        expected = f"{count} message{'s' if count > 1 else ''} matching {criteria}"
-        deadline = time.monotonic() + timeout
-        while True:
-            found = self._matching(criteria)
-            if len(found) > count:
-                raise MailpitAssertionError(
-                    f"Expected {expected}, found {len(found)}:\n{message_table(found)}"
-                )
-            if len(found) == count:
-                return [self.get_message(summary.id) for summary in found]
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                arrived = f"{len(found)} arrived" if found else "none arrived"
-                hint = outbox_hint()
-                raise MailpitAssertionError(
-                    f"Expected {expected} within {timeout:g}s, {arrived}.\n"
-                    f"{self._what_arrived(criteria)}" + (f"\n{hint}" if hint else "")
-                )
-            time.sleep(min(self.poll_interval, remaining))
+        wait = self._wait_for(count, query, recipient, sender, subject, tag, since, timeout)
+        while (result := wait.poll()) is None:
+            time.sleep(wait.pause())
+        if isinstance(result, _Failed):
+            raise MailpitAssertionError(result.message)
+        return result
 
     def assert_no_message(
         self,
@@ -295,20 +277,43 @@ class MailpitClient:
         Raises MailpitAssertionError, a test failure, as soon as one does.
         """
         __tracebackhide__ = True
+        wait = self._wait_for_none(query, recipient, sender, subject, tag, since, within)
+        while (result := wait.poll()) is None:
+            time.sleep(wait.pause())
+        if isinstance(result, _Failed):
+            raise MailpitAssertionError(result.message)
+
+    def _wait_for(
+        self,
+        count: int,
+        query: str | None,
+        recipient: str | None,
+        sender: str | None,
+        subject: str | None,
+        tag: str | None,
+        since: datetime | None,
+        timeout: float | None,
+    ) -> "_Wait":
+        if count < 1:
+            raise ValueError("count must be at least 1; use assert_no_message to expect none")
+        criteria = _Criteria.build(query, recipient, sender, subject, tag, since)
+        timeout = self.wait_timeout if timeout is None else timeout
+        _require_not_negative(timeout=timeout)
+        return _Wait.start(self, criteria, count, timeout)
+
+    def _wait_for_none(
+        self,
+        query: str | None,
+        recipient: str | None,
+        sender: str | None,
+        subject: str | None,
+        tag: str | None,
+        since: datetime | None,
+        within: float,
+    ) -> "_Wait":
         criteria = _Criteria.build(query, recipient, sender, subject, tag, since)
         _require_not_negative(within=within)
-        deadline = time.monotonic() + within
-        while True:
-            found = self._matching(criteria)
-            if found:
-                raise MailpitAssertionError(
-                    f"Expected no message matching {criteria}, found {len(found)}:\n"
-                    f"{message_table(found)}"
-                )
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            time.sleep(min(self.poll_interval, remaining))
+        return _Wait.start(self, criteria, 0, within)
 
     def _matching(self, criteria: "_Criteria") -> list[MessageSummary]:
         found = [
@@ -447,6 +452,62 @@ class _Criteria:
         if self.since is not None:
             text += f" since {self.since.astimezone(UTC):%H:%M:%S} UTC"
         return text
+
+
+class _Failed(NamedTuple):
+    """A wait that failed, and why."""
+
+    message: str
+
+
+@dataclass(slots=True)
+class _Wait:
+    """One wait for ``count`` messages, or for none (``count == 0``), one poll at a time.
+
+    MailpitClient sleeps between polls and AsyncMailpitClient awaits, so both
+    wait, and fail, the same way.
+    """
+
+    client: MailpitClient
+    criteria: _Criteria
+    count: int
+    timeout: float
+    deadline: float
+
+    @classmethod
+    def start(cls, client: MailpitClient, criteria: _Criteria, count: int, timeout: float) -> Self:
+        return cls(client, criteria, count, timeout, time.monotonic() + timeout)
+
+    def poll(self) -> list[Message] | _Failed | None:
+        """The messages once the wait is over, a failure, or None to poll again."""
+        found = self.client._matching(self.criteria)
+        if self.count == 0:
+            if found:
+                return _Failed(
+                    f"Expected no message matching {self.criteria}, found {len(found)}:\n"
+                    f"{message_table(found)}"
+                )
+            return [] if self.remaining() <= 0 else None
+        expected = f"{self.count} message{'s' if self.count > 1 else ''} matching {self.criteria}"
+        if len(found) > self.count:
+            return _Failed(f"Expected {expected}, found {len(found)}:\n{message_table(found)}")
+        if len(found) == self.count:
+            return [self.client.get_message(summary.id) for summary in found]
+        if self.remaining() > 0:
+            return None
+        arrived = f"{len(found)} arrived" if found else "none arrived"
+        hint = outbox_hint()
+        return _Failed(
+            f"Expected {expected} within {self.timeout:g}s, {arrived}.\n"
+            f"{self.client._what_arrived(self.criteria)}" + (f"\n{hint}" if hint else "")
+        )
+
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    def pause(self) -> float:
+        """How long to wait before the next poll."""
+        return max(0.0, min(self.client.poll_interval, self.remaining()))
 
 
 def _count(found: list[MessageSummary]) -> str:
