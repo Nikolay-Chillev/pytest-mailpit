@@ -16,6 +16,10 @@ in any release.
 - `Message.unsubscribe_link()`: the HTTP(S) link of the List-Unsubscribe header, failing the test if the header is missing, invalid or has no such link; with `one_click=True` it also checks the HTTPS link and `List-Unsubscribe-Post` that RFC 8058 one-click unsubscription needs.
 - `ListUnsubscribe.http_link`, `mailto_link` and `one_click`.
 
+### Documentation
+
+- Recipes for docker compose and Testcontainers, run in CI on every change, and a guide for migrating from MailHog.
+
 ## [0.1.0a1] - 2026-10-08
 
 The first release.

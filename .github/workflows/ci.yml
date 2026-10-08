@@ -89,11 +89,36 @@ jobs:
         run: curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 "${MAILPIT_URL}api/v1/info"
       - run: python -m pytest -m integration
 
+  # The recipes in examples/ must keep working as documented.
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install . requests "testcontainers[mailpit]"
+      - name: Start the docker compose example
+        working-directory: examples/docker-compose
+        run: docker compose up --detach --build --wait --wait-timeout 120
+      - name: Test the docker compose example
+        working-directory: examples/docker-compose
+        run: python -m pytest tests
+      - name: Stop the docker compose example
+        if: ${{ always() }}
+        working-directory: examples/docker-compose
+        run: docker compose down
+      - name: Test the Testcontainers example
+        run: python -m pytest examples/testcontainers
+
   # The single check to require on main: fails if any job failed or was cancelled.
   ci-passed:
     name: CI passed
     if: ${{ always() }}
-    needs: [lint, test, integration]
+    needs: [lint, test, integration, examples]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
