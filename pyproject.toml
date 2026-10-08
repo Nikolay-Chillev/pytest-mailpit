@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pytest-mailpit"
-version = "0.3.0"
+version = "0.4.0"
 description = "pytest fixtures and a typed client for testing real emails with Mailpit — parallel-safe, no sleeps"
 readme = "README.md"
 license = "MIT"

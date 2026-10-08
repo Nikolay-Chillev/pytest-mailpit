@@ -6,13 +6,15 @@ in any release.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-08
+
 ### Added
 
 - `mailpit_django`: Django sends the test's email over SMTP to Mailpit instead of keeping it in `django.core.mail.outbox`, so `mailpit_inbox` gets it as the recipient does. It sets `MAILERS` on Django 6.1 and newer, and `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` on older versions.
+- When a wait for a message times out while Django keeps email in memory, the failure says so and suggests `mailpit_django`.
 - `mailpit_async_inbox` and `mailpit_async`: the inbox and the client for async tests, with `AsyncInbox` and `AsyncMailpitClient`. Waiting yields to the event loop between polls, so an application that sends email from the same loop keeps running. No async HTTP library is needed: each request runs in a worker thread.
 - A failed test's kept messages are tagged with its name, such as `failed test_sign_up`, keeping the tags the application gave them, and the report links to Mailpit's search for the tag. `mailpit_tag_failures = false` turns it off.
 - `MailpitClient.set_tags()` and `MailpitClient.search_url()`, and their `AsyncMailpitClient` versions.
-- When a wait for a message times out while Django keeps email in memory, the failure says so and suggests `mailpit_django`.
 
 ### Documentation
 
@@ -67,7 +69,8 @@ The first release.
 - **Links and one-time codes** found in a message's HTML and text.
 - **`MailpitClient`**, a typed client for Mailpit's API: search, messages, headers, raw source, parts, deleting, read status and server time; it works under a web root, with basic auth and custom TLS verification.
 
-[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.1.0a1...v0.2.0
 [0.1.0a1]: https://github.com/Nikolay-Chillev/pytest-mailpit/releases/tag/v0.1.0a1
