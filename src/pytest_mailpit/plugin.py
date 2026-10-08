@@ -239,26 +239,31 @@ def mailpit_inbox(mailpit_inbox_factory: Callable[[], Inbox]) -> Inbox:
 
 
 def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
+    # Fail outside the except blocks: failing inside one makes pytest print the
+    # whole chain of requests and urllib3 exceptions above the message.
+    unreachable = problem = None
     try:
         info = client.info()
     except MailpitConnectionError as error:
-        message = (
-            f"Cannot reach Mailpit at {client.url}.\n"
+        unreachable = (
+            f"Cannot reach Mailpit at {client.url} ({_root_cause(error)}).\n"
             "Start Mailpit, for example: docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit\n"
-            "or point pytest-mailpit at it with --mailpit-url or MAILPIT_URL.\n"
-            f"Cause: {error}"
+            "or point pytest-mailpit at it with --mailpit-url or MAILPIT_URL."
         )
-        if config.skip_if_unreachable:
-            pytest.skip(message)
-        pytest.fail(message, pytrace=False)
     except MailpitAPIError as error:
         if error.status_code == 401:
-            pytest.fail(
+            problem = (
                 f"Mailpit at {client.url} requires a username and password: "
-                "set MAILPIT_USERNAME and MAILPIT_PASSWORD.",
-                pytrace=False,
+                "set MAILPIT_USERNAME and MAILPIT_PASSWORD."
             )
-        pytest.fail(f"Mailpit at {client.url} cannot be used: {error}", pytrace=False)
+        else:
+            problem = f"Mailpit at {client.url} cannot be used: {error}"
+    if unreachable is not None:
+        if config.skip_if_unreachable:
+            pytest.skip(unreachable)
+        pytest.fail(unreachable, pytrace=False)
+    if problem is not None:
+        pytest.fail(problem, pytrace=False)
     version = _version(info.version)
     if version is not None and version < OLDEST_SUPPORTED_VERSION:
         oldest = ".".join(map(str, OLDEST_SUPPORTED_VERSION))
@@ -268,6 +273,14 @@ def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
             MailpitWarning,
             stacklevel=1,
         )
+
+
+def _root_cause(error: BaseException) -> str:
+    """The first line of the innermost cause of an error, e.g. "[Errno 111] Connection refused"."""
+    while error.__cause__ is not None or error.__context__ is not None:
+        error = error.__cause__ or error.__context__  # type: ignore[assignment]
+    text = str(error).strip()
+    return text.splitlines()[0] if text else type(error).__name__
 
 
 def _marker_timeout(node: pytest.Item | pytest.Collector) -> float | None:
