@@ -3,7 +3,7 @@
 import pytest
 
 from pytest_mailpit import MailpitAPIError, MailpitClient, build_query
-from tests.integration.conftest import SendEmail, wait_for_search
+from tests.integration.conftest import SendEmail, arrived
 
 pytestmark = pytest.mark.integration
 
@@ -23,7 +23,7 @@ def test_search_returns_the_summary_of_a_sent_message(
         attachment=("invoice.pdf", b"%PDF-1.7 test"),
     )
 
-    [summary] = wait_for_search(client, build_query(to=recipient))
+    [summary] = arrived(client, recipient)
 
     assert summary.subject == "Поръчка №1001 е потвърдена"
     assert summary.sender.address == "sender@example.test"
@@ -32,7 +32,6 @@ def test_search_returns_the_summary_of_a_sent_message(
     assert [address.address for address in summary.cc] == ["accounts@example.test"]
     assert summary.attachments == 1
     assert summary.created.tzinfo is not None
-    assert not summary.read
 
 
 def test_get_message_returns_bodies_and_attachments(
@@ -44,7 +43,7 @@ def test_get_message_returns_bodies_and_attachments(
         html='<p>Track <a href="https://shop.example.test/orders/1001">your order</a></p>',
         attachment=("invoice.pdf", b"%PDF-1.7 test"),
     )
-    [summary] = wait_for_search(client, build_query(to=recipient))
+    [summary] = arrived(client, recipient)
 
     message = client.get_message(summary.id)
 
@@ -59,7 +58,7 @@ def test_get_headers_and_raw_source(
     client: MailpitClient, send_email: SendEmail, recipient: str
 ) -> None:
     send_email(recipient, subject="Headers check")
-    [summary] = wait_for_search(client, build_query(to=recipient))
+    [summary] = arrived(client, recipient)
 
     assert client.get_headers(summary.id)["Subject"] == ["Headers check"]
     assert b"Subject: Headers check" in client.get_raw(summary.id)
@@ -71,7 +70,7 @@ def test_search_all_reads_every_page(
     for number in range(3):
         send_email(recipient, subject=f"Message {number}")
     query = build_query(to=recipient)
-    wait_for_search(client, query, count=3)
+    arrived(client, recipient, count=3)
 
     found = client.search_all(query, page_size=2)
 
@@ -84,7 +83,7 @@ def test_delete_messages_deletes_only_the_given_ones(
     send_email(recipient, subject="Keep")
     send_email(recipient, subject="Delete")
     query = build_query(to=recipient)
-    found = wait_for_search(client, query, count=2)
+    found = arrived(client, recipient, count=2)
 
     client.delete_messages(summary.id for summary in found if summary.subject == "Delete")
 
@@ -96,7 +95,7 @@ def test_delete_messages_with_no_ids_keeps_the_mailbox(
 ) -> None:
     send_email(recipient)
     query = build_query(to=recipient)
-    wait_for_search(client, query)
+    arrived(client, recipient)
 
     client.delete_messages([])
 
@@ -107,7 +106,7 @@ def test_delete_search(client: MailpitClient, send_email: SendEmail, recipient: 
     send_email(recipient)
     send_email(recipient)
     query = build_query(to=recipient)
-    wait_for_search(client, query, count=2)
+    arrived(client, recipient, count=2)
 
     client.delete_search(query)
 
@@ -117,13 +116,14 @@ def test_delete_search(client: MailpitClient, send_email: SendEmail, recipient: 
 def test_mark_read_and_unread(client: MailpitClient, send_email: SendEmail, recipient: str) -> None:
     send_email(recipient)
     query = build_query(to=recipient)
-    [summary] = wait_for_search(client, query)
-
-    client.mark_read([summary.id])
-    assert client.search_all(query)[0].read
+    # Waiting fetched the message, so Mailpit has marked it as read.
+    [summary] = arrived(client, recipient)
 
     client.mark_read([summary.id], read=False)
     assert not client.search_all(query)[0].read
+
+    client.mark_read([summary.id])
+    assert client.search_all(query)[0].read
 
 
 def test_unknown_message_is_a_404(client: MailpitClient) -> None:
