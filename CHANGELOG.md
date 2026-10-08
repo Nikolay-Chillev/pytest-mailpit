@@ -11,6 +11,10 @@ in any release.
 - A failed test's emails are attached to Allure (`--alluredir`) and pytest-html (`--html`) reports, so CI reports keep them after Mailpit is gone. Allure gets each email as HTML or text and its source as an `.eml` file; pytest-html gets a link to the email in Mailpit and the email in a sandboxed frame. The ten newest emails of each inbox are attached.
 - `mailpit_report_messages`: set it to `false` to keep a failed test's emails out of its report and attachments.
 - `MailpitClient.view_url()`: the page of a message in Mailpit's web UI.
+- `Message.attachment()`: the one attachment with a file name and content type, wildcards allowed; inline parts such as embedded images with `include_inline=True`. It fails the test unless exactly one matches, and lists the message's attachments.
+- `MailpitClient.get_attachment()`: the content of an attachment. Attachments now know the message they belong to (`Attachment.message_id`).
+- `Message.unsubscribe_link()`: the HTTP(S) link of the List-Unsubscribe header, failing the test if the header is missing, invalid or has no such link; with `one_click=True` it also checks the HTTPS link and `List-Unsubscribe-Post` that RFC 8058 one-click unsubscription needs.
+- `ListUnsubscribe.http_link`, `mailto_link` and `one_click`.
 
 ## [0.1.0a1] - 2026-10-08
 

@@ -98,13 +98,40 @@ message.code(r"[A-Z]{2}-\d{4}")  # a code in your own format
 
 `link()` and `code()` fail the test unless exactly one candidate is found, and list what the message does contain. Codes are 4–8 digits (or `123 456`) near words such as "code", "OTP" or "verification"; Bulgarian ("код") is understood too.
 
-Attachments are listed with their name, type and size; their content comes from the client:
+#### Attachments
+
+`attachment()` finds the one attachment with a file name and content type, both with shell-style wildcards and case-insensitive; the content comes from the client:
 
 ```python
-[invoice] = message.attachments
-assert invoice.file_name == "invoice-1001.pdf"
-assert mailpit.get_part(message.id, invoice.part_id).startswith(b"%PDF")
+invoice = message.attachment("invoice-*.pdf", content_type="application/pdf")
+assert invoice.size > 1000
+assert mailpit.get_attachment(invoice).startswith(b"%PDF")
+
+logo = message.attachment(content_type="image/*", include_inline=True)  # an embedded image
 ```
+
+Like `link()`, it fails unless exactly one attachment matches, and lists the ones the message has:
+
+```
+Expected one attachment named 'receipt-*.pdf' in message 'Your invoice' to pytest-3f9a2c-7b1e4d9a@example.com, found 0.
+Attachments in the message:
+  invoice-1001.pdf (application/pdf, 12.3 kB)
+```
+
+#### Unsubscribe links
+
+`unsubscribe_link()` returns the HTTP(S) link of the List-Unsubscribe header, and fails if the header is missing, Mailpit found problems in it, or it has no HTTP(S) link. With `one_click=True` it also checks what Gmail and Yahoo require from bulk senders: an HTTPS link and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058).
+
+```python
+def test_newsletter_can_be_unsubscribed_in_one_click(app_client, mailpit_inbox):
+    app_client.post("/newsletter/subscribe", data={"email": mailpit_inbox.address})
+    newsletter = mailpit_inbox.wait_for_message(subject="Our October news")
+
+    link = newsletter.unsubscribe_link(one_click=True)
+    app_client.post(link, data={"List-Unsubscribe": "One-Click"})
+```
+
+`message.list_unsubscribe` holds the header as Mailpit parsed it: `header`, `header_post`, `http_link`, `mailto_link`, `one_click` and `errors`.
 
 ### More than one address
 
