@@ -43,8 +43,10 @@ Changelog = "https://github.com/Nikolay-Chillev/pytest-mailpit/blob/main/CHANGEL
 
 [dependency-groups]
 dev = [
+    "allure-pytest>=2.13",
     "coverage>=7.10",
     "mypy>=2.4",
+    "pytest-html>=4.1",
     "pytest-xdist>=3.8",
     "responses>=0.26",
     "ruff>=0.16",
@@ -94,3 +96,8 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+
+# Optional integrations without type hints.
+[[tool.mypy.overrides]]
+module = ["allure", "allure.*", "pytest_html", "pytest_html.*"]
+ignore_missing_imports = true

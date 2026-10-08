@@ -319,3 +319,9 @@ def test_unreachable_server_is_not_ready(
     mocked: responses.RequestsMock, client: MailpitClient
 ) -> None:
     assert not client.is_ready()
+
+
+def test_view_url_is_the_message_page_in_the_web_ui() -> None:
+    client = MailpitClient("http://user:secret@mailpit.test/mailpit")
+
+    assert client.view_url("Aa1Bb2") == "http://mailpit.test/mailpit/view/Aa1Bb2"

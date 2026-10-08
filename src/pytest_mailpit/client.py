@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import Self
+from urllib.parse import urljoin
 
 from pytest_mailpit._http import Transport
 from pytest_mailpit._report import message_table
@@ -153,6 +154,10 @@ class MailpitClient:
     def get_part(self, message_id: str, part_id: str) -> bytes:
         """The content of an attachment or inline part, by its ``part_id``."""
         return self._http.request("GET", f"api/v1/message/{message_id}/part/{part_id}").content
+
+    def view_url(self, message_id: str) -> str:
+        """The page of the message in Mailpit's web UI, without credentials."""
+        return urljoin(self.url, f"view/{message_id}")
 
     # Waiting
     #
