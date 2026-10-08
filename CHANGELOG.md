@@ -10,6 +10,8 @@ in any release.
 
 - `Message.assert_links_work()`: fails the test if a link in the message answers with an error status or not at all, using Mailpit's link check; `ignore` skips links such as social networks, and a hint explains Mailpit's refusal to check internal addresses.
 - `Message.assert_html_support(at_least=...)`: fails the test unless email clients support enough of the message's HTML and CSS, using Mailpit's HTML check (caniemail.com data), and lists the worst problems.
+- `mailpit_container = true` (or `--mailpit-container`): the plugin starts Mailpit in a Docker container for the session through Testcontainers, on first use, with Chaos enabled and without reverse DNS lookups; every pytest-xdist worker gets its own. Install it with `pip install "pytest-mailpit[testcontainers]"`; `mailpit_container_image` picks the image, and the `mailpit_container` fixture is the container.
+- `mailpit_smtp`: the host and port where the application under test sends email, from the container or from `MAILPIT_SMTP` / `mailpit_smtp` (default `localhost:1025`), as an `SMTPServer`.
 - `Message.open(page)`: shows the message's HTML in a browser page as its recipient would see it, inline images included, and returns the page, e.g. to click a link with Playwright. `Message.screenshot(page)` returns a PNG of the whole message. Neither needs Playwright installed; any page with `goto()` works.
 - `MailpitClient.html_url()`: Mailpit's rendering of a message's HTML part.
 - `Message.check_links()`, `Message.check_html()`, `MailpitClient.check_links()` and `MailpitClient.check_html()` return the full results: `LinkCheck`, `LinkStatus`, `HTMLCheck` and `HTMLWarning`. A message fetched by a client remembers it for these checks.

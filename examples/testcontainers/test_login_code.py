@@ -16,8 +16,8 @@ def send_login_code(smtp_server: tuple[str, int], address: str) -> str:
     return code
 
 
-def test_login_code_arrives(mailpit_inbox, smtp_server):
-    sent = send_login_code(smtp_server, mailpit_inbox.address)
+def test_login_code_arrives(mailpit_inbox, mailpit_smtp):
+    sent = send_login_code(mailpit_smtp, mailpit_inbox.address)
 
     message = mailpit_inbox.wait_for_message(subject="Your login code")
 

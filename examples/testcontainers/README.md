@@ -1,27 +1,50 @@
 # pytest-mailpit with Testcontainers
 
-[Testcontainers for Python](https://testcontainers-python.readthedocs.io/) can start Mailpit for the test session, so nothing has to run before `pytest`. Its `MailpitContainer` gives the container and its ports; pytest-mailpit adds the inboxes and the waiting. CI runs this example on every change.
+pytest-mailpit can start Mailpit in a Docker container for the test session, through [Testcontainers for Python](https://testcontainers-python.readthedocs.io/), so nothing has to run before `pytest`. CI runs this example on every change.
 
 ```bash
-pip install pytest-mailpit "testcontainers[mailpit]"
+pip install "pytest-mailpit[testcontainers]"
 pytest
 ```
 
-Docker must be running on the machine.
+Docker must be running on the machine. The whole setup is one line of [`pytest.ini`](pytest.ini):
+
+```ini
+[pytest]
+mailpit_container = true
+```
+
+or `pytest --mailpit-container` for a single run.
 
 ## How it fits together
 
-[`conftest.py`](conftest.py) has three fixtures:
+- The container starts the first time a test needs Mailpit, and stops at the end of the session. Under pytest-xdist every worker gets its own.
+- `mailpit_config`, the `mailpit` client and every `mailpit_inbox` use the container's URL, on a random host port, so tests never depend on 8025 being free.
+- `mailpit_smtp` is the host and port where the application under test sends its email; [`test_login_code.py`](test_login_code.py) emails a one-time code there and reads it back with `message.code()`.
+- The container runs with Chaos enabled, for `mailpit_chaos`, and without reverse DNS lookups, which delay messages inside containers.
+- `mailpit_container_image` picks the image, for example `axllent/mailpit:v1.31.4` to pin a version.
 
-- `mailpit_container` starts Mailpit once per session and stops it at the end.
-- `mailpit_config` overrides the plugin's fixture of the same name: it takes the plugin's settings and replaces the URL with the container's. The `mailpit` client and every `mailpit_inbox` use these settings, so nothing else changes.
-- `smtp_server` is the host and port where the application under test sends its email.
+## Your own container
 
-[`test_login_code.py`](test_login_code.py) emails a one-time code to the test's inbox and reads it back with `message.code()`, without a fixed `sleep`.
+To configure the container yourself, start it in a session fixture and point the plugin at it by overriding `mailpit_config`; the `mailpit` client, every inbox and `mailpit_smtp` use it:
 
-## Notes
+```python
+import dataclasses
 
-- The container uses a random port on the host each time; the fixtures read it from the container, so tests never depend on 8025 being free.
-- Configure the application under test with `smtp_server`, for example through its settings or environment, before it sends anything.
-- `MailpitContainer` turns on STARTTLS and accepts any SMTP login by default; see its documentation for SMTP users and required TLS.
-- The report header of pytest still shows the URL from the settings (`http://localhost:8025/` by default), because the container starts after the header is printed.
+import pytest
+from testcontainers.community.mailpit import MailpitContainer
+
+from pytest_mailpit import SMTPServer
+
+
+@pytest.fixture(scope="session")
+def my_mailpit():
+    with MailpitContainer().with_env("MP_MAX_MESSAGES", "5000") as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def mailpit_config(mailpit_config, my_mailpit):
+    smtp = SMTPServer(my_mailpit.get_container_host_ip(), my_mailpit.get_exposed_smtp_port())
+    return dataclasses.replace(mailpit_config, url=my_mailpit.get_base_api_url(), smtp=smtp)
+```
