@@ -80,6 +80,8 @@ def mailpit_api() -> Iterator[responses.RequestsMock]:
         )
         mock.get(f"{URL}api/v1/message/m1", json=samples.MESSAGE | {"ID": "m1"})
         mock.delete(f"{URL}api/v1/messages", body="ok")
+        mock.get(f"{URL}api/v1/chaos", json={})
+        mock.put(f"{URL}api/v1/chaos", json={})
         yield mock
 
 
@@ -177,6 +179,16 @@ def test_docker_not_running_fails_with_a_short_message(pytester: pytest.Pytester
         ]
     )
     assert "During handling of the above exception" not in result.stdout.str()
+
+
+def test_chaos_in_a_container_per_worker_needs_no_warning(
+    pytester: pytest.Pytester, mailpit_api: responses.RequestsMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+    pytester.makeini("[pytest]\nmailpit_container = true\n")
+    pytester.makepyfile("def test_chaos(mailpit_chaos): mailpit_chaos.reject_recipients()")
+
+    pytester.runpytest().assert_outcomes(passed=1, warnings=0)
 
 
 def test_the_container_fixture_needs_the_setting(pytester: pytest.Pytester) -> None:

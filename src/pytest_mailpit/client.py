@@ -14,6 +14,7 @@ from pytest_mailpit._report import message_table
 from pytest_mailpit.errors import MailpitAssertionError, MailpitError
 from pytest_mailpit.models import (
     Attachment,
+    ChaosTriggers,
     HTMLCheck,
     LinkCheck,
     Message,
@@ -364,6 +365,22 @@ class MailpitClient:
         ids = _unique(message_ids)
         if ids:
             self._http.request("PUT", "api/v1/messages", json_body={"IDs": ids, "Read": read})
+
+    # Chaos: SMTP errors on purpose. Mailpit must run with Chaos enabled
+    # (MP_ENABLE_CHAOS=true or --enable-chaos), or it answers with HTTP 400.
+
+    def chaos(self) -> ChaosTriggers:
+        """The SMTP errors Mailpit returns on purpose."""
+        return ChaosTriggers.from_api(self._http.get_json("api/v1/chaos"))
+
+    def set_chaos(self, triggers: ChaosTriggers) -> ChaosTriggers:
+        """Replace all of Mailpit's Chaos triggers and return them as Mailpit applied them.
+
+        They apply to every message Mailpit receives; ``set_chaos(ChaosTriggers())``
+        turns every error off.
+        """
+        response = self._http.request("PUT", "api/v1/chaos", json_body=triggers.to_api())
+        return ChaosTriggers.from_api(response.json())
 
 
 @dataclass(frozen=True, slots=True)

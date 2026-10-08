@@ -37,6 +37,7 @@ import pytest
 from pytest_mailpit._container import start_container, testcontainers_installed
 from pytest_mailpit._http import _without_credentials
 from pytest_mailpit._reporting import report_failure
+from pytest_mailpit.chaos import Chaos
 from pytest_mailpit.client import MailpitClient
 from pytest_mailpit.config import DEFAULT_DOMAIN, DEFAULT_IMAGE, MailpitConfig, SMTPServer
 from pytest_mailpit.errors import (
@@ -46,6 +47,7 @@ from pytest_mailpit.errors import (
     MailpitWarning,
 )
 from pytest_mailpit.inbox import Inbox, unique_address
+from pytest_mailpit.models import ChaosTriggers
 
 # The oldest Mailpit version pytest-mailpit is tested against.
 OLDEST_SUPPORTED_VERSION = (1, 22)
@@ -334,6 +336,34 @@ def mailpit_inbox(mailpit_inbox_factory: Callable[[], Inbox]) -> Inbox:
     return mailpit_inbox_factory()
 
 
+@pytest.fixture
+def mailpit_chaos(mailpit: MailpitClient, mailpit_config: MailpitConfig) -> Iterator[Chaos]:
+    """Makes Mailpit's SMTP server reject messages, to test how the application handles it.
+
+    Mailpit must run with Chaos enabled: ``MP_ENABLE_CHAOS=true``, or
+    ``mailpit_container = true``. The errors apply to every message Mailpit
+    receives; after the test, the triggers Mailpit had before are restored.
+    """
+    original = _chaos_triggers(mailpit)
+    if os.environ.get("PYTEST_XDIST_WORKER") and not mailpit_config.container:
+        warnings.warn(
+            "mailpit_chaos makes Mailpit reject the messages of every pytest-xdist worker, "
+            "not only this test's. Give each worker its own Mailpit with "
+            "mailpit_container = true, or run the Chaos tests in a run without -n.",
+            MailpitWarning,
+            stacklevel=1,
+        )
+    yield Chaos(mailpit)
+    try:
+        mailpit.set_chaos(original)
+    except MailpitError as error:
+        warnings.warn(
+            f"Could not restore Mailpit's Chaos triggers, so it may still reject messages: {error}",
+            MailpitWarning,
+            stacklevel=1,
+        )
+
+
 # Helpers
 
 
@@ -372,6 +402,23 @@ def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
             MailpitWarning,
             stacklevel=1,
         )
+
+
+def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
+    try:
+        return client.chaos()
+    except MailpitAPIError as error:
+        if error.status_code == 400:  # "Chaos is not enabled"
+            problem = (
+                f"mailpit_chaos needs Chaos enabled in Mailpit at {client.url}: start Mailpit "
+                "with MP_ENABLE_CHAOS=true or --enable-chaos, or use mailpit_container = true."
+            )
+        elif error.status_code == 404:
+            problem = f"mailpit_chaos needs Mailpit 1.22 or newer at {client.url}."
+        else:
+            raise
+    # Fail outside the except block, so pytest does not print the API error above the message.
+    pytest.fail(problem, pytrace=False)
 
 
 def _root_cause(error: BaseException) -> str:
