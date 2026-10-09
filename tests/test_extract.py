@@ -344,3 +344,27 @@ def test_a_code_on_its_own_line_far_below_the_keyword_is_found_by_distance() -> 
     text = "Your code\nis below.\nKeep it safe.\nDo not share it.\n4829"
 
     assert message(text=text).codes() == ["4829"]
+
+
+def test_a_pattern_finds_a_token_inside_a_link() -> None:
+    email = message(text="Sign in: https://shop.test/magic?token=Xy12AbC9")
+
+    assert email.code(r"token=(\w+)") == "Xy12AbC9"
+
+
+@pytest.mark.parametrize(
+    ("fields", "described"),
+    [
+        ({"Cc": [{"Name": "", "Address": "pytest-a@example.com"}]}, "to cc pytest-a@example.com"),
+        ({"Bcc": [{"Name": "", "Address": "pytest-a@example.com"}]}, "to bcc pytest-a@example.com"),
+        ({}, "to no one"),
+    ],
+)
+def test_a_failure_names_the_cc_or_bcc_of_a_message_without_to(
+    fields: dict[str, object], described: str
+) -> None:
+    # A newsletter to "undisclosed-recipients", its readers in Bcc.
+    email = Message.from_api(samples.MESSAGE | {"To": [], "Cc": [], "Bcc": []} | fields)
+
+    with pytest.raises(MailpitAssertionError, match=f"in message .* {described}, found 0"):
+        email.link("/no-such-link/")

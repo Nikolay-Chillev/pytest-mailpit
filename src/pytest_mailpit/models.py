@@ -6,10 +6,12 @@ models parse responses from every supported server version.
 """
 
 import fnmatch
+import inspect
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self, TypeVar
 
 from pytest_mailpit._args import strings
@@ -31,7 +33,7 @@ class Page(Protocol):
 class ScreenshotPage(Page, Protocol):
     """What :meth:`Message.screenshot` needs of a browser page, e.g. Playwright's."""
 
-    def screenshot(self, *, path: str | None = ..., full_page: bool = ...) -> bytes: ...
+    def screenshot(self, *, path: str | Path | None = ..., full_page: bool = ...) -> bytes: ...
 
 
 # Longest excerpt of a message body shown in a failure.
@@ -427,6 +429,9 @@ class Message:
                 content_type is None or _matches(_base_type(attachment.content_type), content_type)
             )
         ]
+        if name is not None and len(found) > 1:
+            # An exact name wins: as a wildcard, "report[1].pdf" also matches "report1.pdf".
+            found = [a for a in found if a.file_name.casefold() == name.casefold()] or found
         if len(found) == 1:
             return found[0]
         wanted = []
@@ -441,8 +446,12 @@ class Message:
             lines += [f"  {attachment}" for attachment in candidates]
         else:
             lines.append("The message has no attachments.")
-            if self.inline and not include_inline:
-                lines.append(f"It has {len(self.inline)} inline part(s): pass include_inline=True.")
+        if self.inline and not include_inline:
+            # Some mail clients send attachments such as PDFs inline.
+            lines.append(
+                f"Inline parts, which count with include_inline=True ({len(self.inline)}):"
+            )
+            lines += [f"  {attachment}" for attachment in self.inline]
         raise MailpitAssertionError("\n".join(lines))
 
     def unsubscribe_link(self, *, one_click: bool = False) -> str:
@@ -548,15 +557,30 @@ class Message:
         it works with a Playwright ``Page`` or anything else with ``goto(url)``.
         If Mailpit asks for a password, give the browser context its
         ``http_credentials``. Raises MailpitAssertionError, a test failure, if
-        the message has no HTML part.
+        the message has no HTML part or Mailpit answers with an error, such as
+        401 without credentials or 404 for a message deleted meanwhile.
+
+        The page must be sync. With an async Playwright page, open the message
+        with ``await page.goto(mailpit_async.html_url(message.id))``.
         """
         __tracebackhide__ = True
         if not self.html.strip():
             raise MailpitAssertionError(f"The {self._describe()} has no HTML part to open.")
-        page.goto(self._require_client().html_url(self.id))
+        url = self._require_client().html_url(self.id)
+        response = page.goto(url)
+        if inspect.isawaitable(response):
+            # The navigation never happens; close the coroutine so it is not "never awaited".
+            getattr(response, "close", lambda: None)()
+            raise TypeError(
+                "Message.open() and screenshot() need a sync page. With an async page: "
+                "await page.goto(mailpit_async.html_url(message.id))"
+            )
+        status = getattr(response, "status", None)
+        if isinstance(status, int) and status >= 400:
+            raise MailpitAssertionError(_page_error(self._describe(), url, status))
         return page
 
-    def screenshot(self, page: ScreenshotPage, *, path: str | None = None) -> bytes:
+    def screenshot(self, page: ScreenshotPage, *, path: str | Path | None = None) -> bytes:
         """Open the message in ``page`` and return a PNG of the whole of it,
         also saved to ``path`` if given, e.g. for visual comparison."""
         __tracebackhide__ = True
@@ -575,8 +599,12 @@ class Message:
         return find_links(self.text, self.html)
 
     def _describe(self) -> str:
-        recipients = ", ".join(address.address for address in self.to) or "no one"
-        return f"message {self.subject!r} to {recipients}"
+        # A newsletter's To may be empty, with its readers in Bcc.
+        for field_name, addresses in (("", self.to), ("cc ", self.cc), ("bcc ", self.bcc)):
+            if addresses:
+                recipients = ", ".join(address.address for address in addresses)
+                return f"message {self.subject!r} to {field_name}{recipients}"
+        return f"message {self.subject!r} to no one"
 
 
 def _describe_filters(
@@ -594,7 +622,19 @@ def _describe_filters(
 
 
 def _matches(value: str, pattern: str) -> bool:
-    return fnmatch.fnmatchcase(value.casefold(), pattern.casefold())
+    # The exact name first: in a wildcard, "[1]" of "report[1].pdf" is a character class.
+    value, pattern = value.casefold(), pattern.casefold()
+    return value == pattern or fnmatch.fnmatchcase(value, pattern)
+
+
+def _page_error(message: str, url: str, status: int) -> str:
+    """Why a browser could not open a message in Mailpit."""
+    error = f"Mailpit answered {url} with HTTP {status}, so the browser shows no {message}."
+    if status == 401:
+        error += " Give the browser context Mailpit's http_credentials."
+    elif status == 404:
+        error += " The message was deleted meanwhile, by a cleanup or MP_MAX_MESSAGES."
+    return error
 
 
 def _base_type(content_type: str) -> str:
@@ -688,6 +728,18 @@ class ChaosTrigger:
     error_code: int
     # The chance of the error for each SMTP command, in percent: 0 is never, 100 always.
     probability: int = 0
+
+    def __post_init__(self) -> None:
+        # Checked here, before Mailpit sees it: it applies the triggers one by one and
+        # stops at an invalid one, so a bad trigger leaves the others half changed.
+        if not 400 <= self.error_code <= 599:
+            raise ValueError(
+                f"code must be an SMTP error code from 400 to 599, got {self.error_code!r}"
+            )
+        if not 0 <= self.probability <= 100:
+            raise ValueError(
+                f"probability must be a percentage from 0 to 100, got {self.probability!r}"
+            )
 
     @property
     def active(self) -> bool:

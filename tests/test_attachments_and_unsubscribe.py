@@ -100,7 +100,9 @@ def test_attachment_failure_points_at_inline_parts() -> None:
         email.attachment()
 
     assert str(raised.value).endswith(
-        "The message has no attachments.\nIt has 1 inline part(s): pass include_inline=True."
+        "The message has no attachments.\n"
+        "Inline parts, which count with include_inline=True (1):\n"
+        "  logo.png (image/png, 2.5 MB)"
     )
 
 
@@ -205,3 +207,26 @@ def test_attachment_failure_on_a_message_without_any_parts() -> None:
         message([]).attachment("invoice.pdf")
 
     assert str(raised.value).endswith("found 0.\nThe message has no attachments.")
+
+
+def test_an_exact_name_with_brackets_matches_itself() -> None:
+    email = message(
+        [part("report[1].pdf", "application/pdf"), part("report1.pdf", "application/pdf")]
+    )
+
+    assert email.attachment("report[1].pdf").file_name == "report[1].pdf"
+
+
+def test_a_failure_lists_inline_parts_next_to_attachments() -> None:
+    # Some mail clients send a PDF inline.
+    email = message(
+        [part("terms.pdf", "application/pdf")],
+        inline=[part("invoice.pdf", "application/pdf", size=1024)],
+    )
+
+    with pytest.raises(MailpitAssertionError) as raised:
+        email.attachment("invoice.pdf")
+
+    assert "Inline parts, which count with include_inline=True (1):\n  invoice.pdf" in str(
+        raised.value
+    )
