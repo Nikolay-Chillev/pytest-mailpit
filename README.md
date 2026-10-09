@@ -105,7 +105,7 @@ message.code()  # the one code
 message.code(r"[A-Z]{2}-\d{4}")  # a code in your own format
 ```
 
-`link()` and `code()` fail the test unless exactly one candidate is found, and list what the message does contain. Codes are 4–8 digits (or `123 456`) near words such as "code", "OTP" or "verification"; Bulgarian ("код") is understood too.
+`link()` and `code()` fail the test unless exactly one candidate is found, and list what the message does contain. Codes are 4–8 digits (or `123 456`) next to words such as "code", "OTP" or "verification", on the same line or alone on a line nearby, as in a code box; Bulgarian ("код") is understood too. Years, dates, prices, durations, phone numbers and reference or order numbers are not taken for codes, and when the text part has no code, the HTML is read. A link is found by any of its texts, an image's alt text included, since a logo and a button often point to the same page.
 
 #### Attachments
 
