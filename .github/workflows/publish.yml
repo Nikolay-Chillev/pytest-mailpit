@@ -1,7 +1,9 @@
 name: Publish to PyPI
 
-# Pushing a tag such as v0.1.0 builds the package; publishing waits for approval
-# in the "pypi" environment, which only accepts v* tags.
+# Pushing a tag such as v0.1.0 runs the whole CI on the tagged commit, then builds
+# the package; publishing waits for approval in the "pypi" environment, which
+# only accepts v* tags. A version on PyPI can never be replaced, so nothing is
+# built before CI has passed on exactly that commit.
 on:
   push:
     tags: ["v*"]
@@ -10,12 +12,25 @@ permissions:
   contents: read
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build the distributions
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # the history of main, for the check below
+      - name: Check that the tagged commit is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main"
+            exit 1
+          fi
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"

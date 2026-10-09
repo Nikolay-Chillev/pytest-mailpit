@@ -72,7 +72,8 @@ dev = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
+# Anchored, so that examples/*/tests and examples/*/README.md stay out.
+include = ["/src", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [tool.pytest.ini_options]
 minversion = "8.4"
