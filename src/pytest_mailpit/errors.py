@@ -28,6 +28,10 @@ class MailpitAPIError(MailpitError):
         message = f"{method} {url} returned HTTP {status_code}"
         super().__init__(f"{message}: {detail}" if detail else message)
 
+    def __reduce__(self) -> tuple[type["MailpitAPIError"], tuple[str, str, int, str]]:
+        # For pickle and copy, e.g. across multiprocessing: rebuilt from all four values.
+        return type(self), (self.method, self.url, self.status_code, self.detail)
+
 
 class MailpitWarning(UserWarning):
     """Something pytest-mailpit could work around but you should know about,

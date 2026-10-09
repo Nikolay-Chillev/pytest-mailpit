@@ -114,7 +114,11 @@ class Inbox:
         return found
 
     def clear(self) -> None:
-        """Delete the messages sent to the address, and no others."""
+        """Delete the messages sent to the address, and no others.
+
+        By ID: a search for the address would also delete the messages of any
+        address that contains it, such as ``xa@example.com`` for ``a@example.com``.
+        """
         self.client.delete_messages(summary.id for summary in self.messages())
 
     def describe(self, found: list[MessageSummary] | None = None) -> str:

@@ -9,6 +9,8 @@ from types import TracebackType
 from typing import NamedTuple, Self
 from urllib.parse import quote, urlencode, urljoin
 
+from requests.structures import CaseInsensitiveDict
+
 from pytest_mailpit._args import strings
 from pytest_mailpit._django import outbox_hint
 from pytest_mailpit._http import Transport
@@ -24,7 +26,7 @@ from pytest_mailpit.models import (
     MessageSummary,
     ServerInfo,
 )
-from pytest_mailpit.search import build_query
+from pytest_mailpit.search import build_query, narrows
 
 DEFAULT_URL = "http://localhost:8025/"
 # The link check answers after a HEAD request to every link, of up to 10 s
@@ -58,7 +60,7 @@ class MailpitClient:
         wait_timeout: float = 10.0,
         poll_interval: float = 0.5,
     ) -> None:
-        _require_positive(poll_interval=poll_interval)
+        _require_positive(poll_interval=poll_interval, timeout=timeout)
         _require_not_negative(wait_timeout=wait_timeout)
         self._http = Transport(
             url, username=username, password=password, verify=verify, timeout=timeout
@@ -162,6 +164,14 @@ class MailpitClient:
 
     def search_all(self, query: str, *, page_size: int = 250) -> list[MessageSummary]:
         """All messages matching ``query``, newest first, fetched page by page."""
+        _require_positive(page_size=page_size)
+        return self._search_all(query, page_size=page_size)
+
+    def _search_all(
+        self, query: str, *, page_size: int = 250, since: datetime | None = None
+    ) -> list[MessageSummary]:
+        """search_all(), stopping at the first page that reaches back before ``since``:
+        the results are newest first, so nothing after it is newer."""
         found: dict[str, MessageSummary] = {}
         start = 0
         while True:
@@ -172,6 +182,8 @@ class MailpitClient:
             start += len(page.messages)
             if not page.messages or start >= page.messages_count:
                 return list(found.values())
+            if since is not None and page.messages[-1].created < since:
+                return list(found.values())
 
     def get_message(self, message_id: str = "latest") -> Message:
         """The whole message; ``"latest"`` is the newest one.
@@ -181,10 +193,13 @@ class MailpitClient:
         data = self._http.get_json(f"api/v1/message/{message_id}")
         return Message.from_api(data, client=self)
 
-    def get_headers(self, message_id: str) -> dict[str, list[str]]:
-        """All headers of a message; a header can occur more than once."""
-        headers: dict[str, list[str]] = self._http.get_json(f"api/v1/message/{message_id}/headers")
-        return headers
+    def get_headers(self, message_id: str) -> CaseInsensitiveDict[list[str]]:
+        """All headers of a message; a header can occur more than once.
+
+        Names are case-insensitive: Mailpit gives them in Go's spelling
+        (``Message-Id``), so ``headers["Message-ID"]`` works too.
+        """
+        return CaseInsensitiveDict(self._http.get_json(f"api/v1/message/{message_id}/headers"))
 
     def get_raw(self, message_id: str) -> bytes:
         """The message source, as an .eml file would hold it."""
@@ -359,7 +374,9 @@ class MailpitClient:
 
     def _matching(self, criteria: "_Criteria") -> list[MessageSummary]:
         found = [
-            summary for summary in self.search_all(criteria.query) if criteria.matches(summary)
+            summary
+            for summary in self._search_all(criteria.query, since=criteria.since)
+            if criteria.matches(summary)
         ]
         found.reverse()  # oldest first
         return found
@@ -416,15 +433,29 @@ class MailpitClient:
     # Changing
 
     def delete_messages(self, message_ids: Iterable[str]) -> None:
-        """Delete the given messages. An empty list deletes nothing."""
+        """Delete the given messages. An empty list deletes nothing.
+
+        Before Mailpit 1.30.7, an ID that no longer exists, among IDs that do,
+        locks Mailpit's database until it restarts: delete only messages you
+        know exist, or use delete_search().
+        """
         # Mailpit deletes every message when it gets no IDs, so an empty list must not reach it.
         ids = _unique(message_ids)
         if ids:
             self._http.request("DELETE", "api/v1/messages", json_body={"IDs": ids})
 
     def delete_search(self, query: str) -> None:
-        """Delete the messages matching ``query``."""
+        """Delete the messages matching ``query``.
+
+        Raises ValueError for a query whose terms Mailpit would all drop, such
+        as ``to:`` with an empty address: it would delete every message.
+        """
         _require_query(query)
+        if not narrows(query):
+            raise ValueError(
+                f"Mailpit would ignore every term of {query!r} and delete every message; "
+                "call delete_all() to do that"
+            )
         self._http.request("DELETE", "api/v1/search", params={"query": query})
 
     def delete_all(self) -> None:
@@ -462,8 +493,9 @@ class MailpitClient:
         They apply to every message Mailpit receives; ``set_chaos(ChaosTriggers())``
         turns every error off.
         """
-        response = self._http.request("PUT", "api/v1/chaos", json_body=triggers.to_api())
-        return ChaosTriggers.from_api(response.json())
+        return ChaosTriggers.from_api(
+            self._http.request_json("PUT", "api/v1/chaos", json_body=triggers.to_api())
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -526,7 +558,8 @@ class _Criteria:
     def __str__(self) -> str:
         text = self.query
         if self.since is not None:
-            text += f" since {self.since.astimezone(UTC):%H:%M:%S} UTC"
+            since = self.since.astimezone(UTC)
+            text += f" since {since:%Y-%m-%d %H:%M:%S}.{since.microsecond // 1000:03d} UTC"
         return text
 
 
@@ -560,13 +593,16 @@ class _Wait:
         if self.count == 0:
             if found:
                 return _Failed(
-                    f"Expected no message matching {self.criteria}, found {len(found)}:\n"
-                    f"{message_table(found)}"
+                    f"Expected no message matching {self.criteria}, found {_found(found)}:\n"
+                    f"{message_table(found[-_FAILURE_TABLE_SIZE:])}"
                 )
             return [] if self.remaining() <= 0 else None
         expected = f"{self.count} message{'s' if self.count > 1 else ''} matching {self.criteria}"
         if len(found) > self.count:
-            return _Failed(f"Expected {expected}, found {len(found)}:\n{message_table(found)}")
+            return _Failed(
+                f"Expected {expected}, found {_found(found)}:\n"
+                f"{message_table(found[-_FAILURE_TABLE_SIZE:])}"
+            )
         if len(found) == self.count:
             return [self.client.get_message(summary.id) for summary in found]
         if self.remaining() > 0:
@@ -589,6 +625,13 @@ class _Wait:
     def pause(self) -> float:
         """How long to wait before the next poll."""
         return max(0.0, min(self.client.poll_interval, self.remaining()))
+
+
+def _found(found: list[MessageSummary]) -> str:
+    """ "3", or "12, the newest 10 shown" when the table is cut short."""
+    if len(found) > _FAILURE_TABLE_SIZE:
+        return f"{len(found)}, the newest {_FAILURE_TABLE_SIZE} shown"
+    return str(len(found))
 
 
 def _count(found: list[MessageSummary]) -> str:
@@ -616,5 +659,5 @@ def _require_not_negative(**values: float) -> None:
 
 
 def _unique(message_ids: Iterable[str]) -> list[str]:
-    # Duplicate IDs in one delete locked Mailpit's database before v1.30.7.
+    # Duplicate IDs in one delete locked Mailpit's database before v1.30.7, as missing ones do.
     return list(dict.fromkeys(strings(message_ids, "message IDs")))

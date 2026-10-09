@@ -12,6 +12,8 @@ from datetime import datetime
 from types import TracebackType
 from typing import Self
 
+from requests.structures import CaseInsensitiveDict
+
 from pytest_mailpit._args import strings
 from pytest_mailpit.client import DEFAULT_URL, MailpitClient, _Failed, _Wait
 from pytest_mailpit.errors import MailpitAssertionError
@@ -87,7 +89,7 @@ class AsyncMailpitClient:
     async def get_message(self, message_id: str = "latest") -> Message:
         return await asyncio.to_thread(self.sync.get_message, message_id)
 
-    async def get_headers(self, message_id: str) -> dict[str, list[str]]:
+    async def get_headers(self, message_id: str) -> CaseInsensitiveDict[list[str]]:
         return await asyncio.to_thread(self.sync.get_headers, message_id)
 
     async def get_raw(self, message_id: str) -> bytes:
