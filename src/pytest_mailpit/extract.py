@@ -114,8 +114,9 @@ def find_codes(text: str, html: str, *, pattern: str | re.Pattern[str] | None = 
     code, e.g. when it only says to open the email in an HTML client.
     """
     for body in (text, html_to_text(html)):
-        # Numbers inside links are order or user IDs, not codes.
-        found = _find_codes(_URL_IN_TEXT.sub(" ", body), pattern)
+        # Numbers inside links are order or user IDs, not codes; a pattern may look
+        # for a token in a link, though.
+        found = _find_codes(body if pattern is not None else _URL_IN_TEXT.sub(" ", body), pattern)
         if found:
             return found
     return []

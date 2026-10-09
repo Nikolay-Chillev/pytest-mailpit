@@ -34,16 +34,16 @@ class Chaos:
 
     def reject_senders(self, code: int = 451, *, probability: int = 100) -> None:
         """Fail ``MAIL FROM``: Mailpit refuses the message before its recipients."""
-        self._set(sender=_trigger(code, probability))
+        self._set(sender=ChaosTrigger(code, probability))
 
     def reject_recipients(self, code: int = 451, *, probability: int = 100) -> None:
         """Fail ``RCPT TO``, for each recipient of a message."""
-        self._set(recipient=_trigger(code, probability))
+        self._set(recipient=ChaosTrigger(code, probability))
 
     def reject_authentication(self, code: int = 535, *, probability: int = 100) -> None:
         """Fail ``AUTH``. Mailpit offers SMTP authentication only when it is set up,
         e.g. with ``MP_SMTP_AUTH_ACCEPT_ANY`` and ``MP_SMTP_AUTH_ALLOW_INSECURE``."""
-        self._set(authentication=_trigger(code, probability))
+        self._set(authentication=ChaosTrigger(code, probability))
 
     def reset(self) -> None:
         """Turn every error off."""
@@ -76,11 +76,3 @@ class Chaos:
         if restore:
             self._client.set_chaos(dataclasses.replace(now, **restore))
         self._set_here.clear()
-
-
-def _trigger(code: int, probability: int) -> ChaosTrigger:
-    if not 400 <= code <= 599:
-        raise ValueError(f"code must be an SMTP error code from 400 to 599, got {code!r}")
-    if not 0 <= probability <= 100:
-        raise ValueError(f"probability must be a percentage from 0 to 100, got {probability!r}")
-    return ChaosTrigger(code, probability)

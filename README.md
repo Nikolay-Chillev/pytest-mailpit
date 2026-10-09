@@ -221,7 +221,7 @@ async def test_login_code(async_client, mailpit_async_inbox):
     assert len(message.code()) == 6
 ```
 
-They run on asyncio, as with pytest-asyncio or AnyIO's asyncio backend (not trio), and need no async HTTP library: each request runs in a worker thread through the sync client. The inbox is the same as `mailpit_inbox`, so cleanup and failure reports work the same way. Outside pytest, `AsyncMailpitClient("http://localhost:8025/")`, or `AsyncMailpitClient(MailpitClient(...))` for credentials and timeouts. The [FastAPI example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/fastapi) has an async test.
+They run on asyncio, as with pytest-asyncio or AnyIO's asyncio backend (not trio), and need no async HTTP library: each request runs in a worker thread through the sync client. The inbox is the same as `mailpit_inbox`, so cleanup and failure reports work the same way. Outside pytest, `AsyncMailpitClient("http://localhost:8025/")`, or `AsyncMailpitClient(MailpitClient(...))` for credentials and timeouts. The [FastAPI example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/fastapi) has an async test. The checks and browser helpers of a message are sync: when the application runs in the test's event loop, run a check in a thread, `await asyncio.to_thread(message.assert_links_work)`, so the loop can answer Mailpit's requests; and with an async Playwright page, `await page.goto(mailpit_async.html_url(message.id))`.
 
 ### Django
 

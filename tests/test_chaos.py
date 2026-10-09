@@ -329,3 +329,14 @@ def test_a_failed_restore_is_a_warning(pytester: pytest.Pytester, fake: FakeChao
     result.stdout.fnmatch_lines(
         ["*Could not restore Mailpit's Chaos triggers, so it may still reject messages*"]
     )
+
+
+@pytest.mark.parametrize(("code", "probability"), [(200, 100), (451, 150)])
+def test_an_invalid_trigger_never_reaches_mailpit(
+    fake: FakeChaos, code: int, probability: int
+) -> None:
+    # Mailpit applies the triggers one by one, so a bad one would leave the others changed.
+    with pytest.raises(ValueError, match="must be"):
+        MailpitClient(URL).set_chaos(ChaosTriggers(recipient=ChaosTrigger(code, probability)))
+
+    assert fake.puts == []
