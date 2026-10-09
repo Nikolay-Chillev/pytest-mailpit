@@ -23,12 +23,6 @@ def one_per_address(request: PreparedRequest) -> tuple[int, dict[str, str], str]
     return 200, {}, json.dumps(page(*found))
 
 
-@pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("MAILPIT_URL", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
-
-
 @pytest.fixture
 def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit at the default URL, holding one message for every inbox."""

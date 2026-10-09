@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # Only when a new release falls outside a ">=" range: the runtime lower bounds
+    # are the oldest supported versions, not something to raise.
+    versioning-strategy: increase-if-necessary
     groups:
       python:
         patterns: ["*"]

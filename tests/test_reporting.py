@@ -22,12 +22,6 @@ SOURCE = b"From: shop@example.test\r\nSubject: Order\r\n\r\nThank you for your o
 FAILING_TEST = "def test_fails(mailpit_inbox):\n    assert False\n"
 
 
-@pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("MAILPIT_URL", "MAILPIT_WAIT_TIMEOUT", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
-
-
 def mailpit_with(
     messages_per_inbox: int = 1,
     html_part: str | None = None,
@@ -124,8 +118,13 @@ def test_at_most_the_ten_newest_emails_are_attached(pytester: pytest.Pytester) -
 
     with mailpit_with(messages_per_inbox=12) as mock:
         pytester.runpytest("--alluredir=allure-results").assert_outcomes(failed=1)
-        # responses forgets the calls when the block ends.
-        assert requested(mock, RAW) == 10
+        # responses forgets the calls when the block ends. m12 is the newest.
+        fetched = [
+            call.request.url or "" for call in mock.calls if RAW.match(call.request.url or "")
+        ]
+        assert sorted(url.rsplit("/", 2)[1] for url in fetched) == sorted(
+            f"m{n}" for n in range(3, 13)
+        )
 
     attachments = allure_attachments(pytester.path / "allure-results")
     assert len(attachments) == 1 + 10 * 2

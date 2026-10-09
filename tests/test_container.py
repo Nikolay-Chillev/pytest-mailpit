@@ -17,7 +17,8 @@ from pytest_mailpit import SMTPServer
 from tests import samples
 from tests.test_waiting import page, summary
 
-URL = "http://localhost:8025/"
+# Not the default URL, so a test sees whether the container's is used.
+URL = "http://127.0.0.1:32769/"
 
 
 class FakeContainer:
@@ -73,8 +74,6 @@ class FakeContainer:
 
 @pytest.fixture(autouse=True)
 def fake_testcontainers(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("MAILPIT_URL", "MAILPIT_SMTP", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
     module = types.ModuleType("testcontainers.community.mailpit")
     module.MailpitContainer = FakeContainer  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "testcontainers.community.mailpit", module)
@@ -109,7 +108,7 @@ USES_THE_CONTAINER = """
 from pytest_mailpit import SMTPServer
 
 def test_one(mailpit_config, mailpit_smtp, mailpit_inbox):
-    assert mailpit_config.url == "http://localhost:8025/"
+    assert mailpit_config.url == "http://127.0.0.1:32769/"
     assert mailpit_smtp == SMTPServer("127.0.0.1", 32768)
     assert mailpit_inbox.wait_for_message().id == "m1"
 

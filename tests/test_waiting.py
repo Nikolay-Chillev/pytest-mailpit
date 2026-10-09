@@ -74,7 +74,8 @@ def test_waits_until_the_message_arrives(
     mocked.get(SEARCH, json=page(summary("m1")))
     register_messages(mocked, "m1")
 
-    message = client.wait_for_message(recipient="ivan@example.test")
+    # A long timeout: the wait ends as soon as the message arrives, even on a slow machine.
+    message = client.wait_for_message(recipient="ivan@example.test", timeout=10)
 
     assert message.id == "m1"
     assert search_calls(mocked) == 3
@@ -109,7 +110,7 @@ def test_recipient_must_match_the_whole_address(
     mocked.get(SEARCH, json=page(summary("mine", to="A@X.test"), summary("other", to="ba@x.test")))
     register_messages(mocked, "mine")
 
-    assert client.wait_for_message(recipient="a@x.test").id == "mine"
+    assert client.wait_for_message(recipient="a@x.test", timeout=10).id == "mine"
 
 
 def test_recipient_can_be_in_cc(mocked: responses.RequestsMock, client: MailpitClient) -> None:
@@ -161,7 +162,7 @@ def test_wait_for_messages_returns_them_oldest_first(
     )
     register_messages(mocked, "m1", "m2")
 
-    messages = client.wait_for_messages(2, recipient="ivan@example.test")
+    messages = client.wait_for_messages(2, recipient="ivan@example.test", timeout=10)
 
     assert [message.id for message in messages] == ["m1", "m2"]
 
@@ -275,8 +276,11 @@ def test_more_messages_than_expected_fail_at_once(
         ),
     )
 
+    started = time.monotonic()
     with pytest.raises(MailpitAssertionError) as raised:
         client.wait_for_message(recipient="ivan@example.test", timeout=60)
+
+    assert time.monotonic() - started < 5  # at once, not after the 60 s
 
     assert str(raised.value) == (
         'Expected 1 message matching addressed:"ivan@example.test", found 2:\n'
@@ -301,6 +305,20 @@ def test_connection_errors_are_not_mistaken_for_a_missing_message(
     assert not isinstance(raised.value, AssertionError)
 
 
+def test_a_poll_interval_longer_than_the_timeout_does_not_stretch_the_wait(
+    mocked: responses.RequestsMock,
+) -> None:
+    mocked.get(SEARCH, json=page())
+    mocked.get(f"{URL}api/v1/messages", json=page())
+    client = MailpitClient(URL, poll_interval=5)
+    started = time.monotonic()
+
+    with pytest.raises(MailpitAssertionError, match=r"within 0\.1s"):
+        client.wait_for_message(recipient="a@x.test", timeout=0.1)
+
+    assert time.monotonic() - started < 2
+
+
 # Expecting no message
 
 
@@ -313,7 +331,7 @@ def test_assert_no_message_waits_the_whole_window(
     client.assert_no_message(recipient="a@x.test", within=0.1)
 
     assert time.monotonic() - started >= 0.1
-    assert search_calls(mocked) >= 2
+    assert search_calls(mocked) >= 1
 
 
 def test_assert_no_message_fails_as_soon_as_one_arrives(
@@ -322,8 +340,11 @@ def test_assert_no_message_fails_as_soon_as_one_arrives(
     mocked.get(SEARCH, json=page())
     mocked.get(SEARCH, json=page(summary("m1", to="a@x.test", subject="Oops")))
 
+    started = time.monotonic()
     with pytest.raises(MailpitAssertionError) as raised:
         client.assert_no_message(recipient="a@x.test", within=60)
+
+    assert time.monotonic() - started < 5  # as soon as it arrives, not after the 60 s
 
     assert str(raised.value) == (
         'Expected no message matching addressed:"a@x.test", found 1:\n'

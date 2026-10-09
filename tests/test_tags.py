@@ -75,10 +75,8 @@ def test_search_url() -> None:
 
 
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[responses.RequestsMock]:
+def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit at the default URL, holding one message, tagged "orders", per inbox."""
-    for name in ("MAILPIT_URL", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
 
     def one_per_address(request: PreparedRequest) -> tuple[int, dict[str, str], str]:
         query = parse_qs(urlsplit(request.url or "").query)["query"][0]
@@ -144,6 +142,8 @@ def test_no_tags_unless_a_failed_test_keeps_its_messages(
 
     result = pytester.runpytest()
 
+    outcomes = result.parseoutcomes()
+    assert outcomes.get("passed", 0) + outcomes.get("failed", 0) == 1
     assert tagged(server) == []
     assert "Tagged" not in result.stdout.str()
 

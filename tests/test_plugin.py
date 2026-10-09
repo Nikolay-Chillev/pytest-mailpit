@@ -18,20 +18,6 @@ SEARCH = re.compile(re.escape(f"{URL}api/v1/search") + r"\?.*")
 MESSAGE = re.compile(re.escape(f"{URL}api/v1/message/") + r"[^/]+$")
 
 
-@pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The inner sessions read MAILPIT_* variables; those of the machine must not leak in."""
-    for name in (
-        "MAILPIT_URL",
-        "MAILPIT_USERNAME",
-        "MAILPIT_PASSWORD",
-        "MAILPIT_VERIFY",
-        "MAILPIT_WAIT_TIMEOUT",
-        "PYTEST_XDIST_WORKER",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-
 @pytest.fixture
 def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit at the default URL, holding one message for every inbox."""
@@ -517,6 +503,8 @@ def test_no_limit_warning_unless_kept_messages_are_at_risk(
 
     result = pytester.runpytest()
 
+    outcomes = result.parseoutcomes()
+    assert outcomes.get("passed", 0) + outcomes.get("failed", 0) == 1
     assert "MailpitWarning" not in result.stdout.str()
 
 

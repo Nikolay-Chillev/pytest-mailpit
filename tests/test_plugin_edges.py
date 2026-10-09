@@ -20,20 +20,6 @@ URL = "http://localhost:8025/"
 MESSAGES = f"{URL}api/v1/messages"
 
 
-@pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in (
-        "MAILPIT_URL",
-        "MAILPIT_USERNAME",
-        "MAILPIT_PASSWORD",
-        "MAILPIT_VERIFY",
-        "MAILPIT_WAIT_TIMEOUT",
-        "MAILPIT_SMTP",
-        "PYTEST_XDIST_WORKER",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-
 # Settings
 
 
