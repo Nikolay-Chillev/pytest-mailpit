@@ -10,6 +10,11 @@ from pytest_mailpit.models import Message, MessageSummary
 from pytest_mailpit.search import build_query
 
 
+def nodeid_hash(test_id: str) -> str:
+    """Six hex digits that tell a test apart, in its inbox addresses and failure tags."""
+    return hashlib.sha256(test_id.encode()).hexdigest()[:6]
+
+
 def unique_address(test_id: str, *, domain: str, worker: str | None = None) -> str:
     """An address no other test uses: "pytest-<worker>-<test>-<random>@<domain>".
 
@@ -21,7 +26,7 @@ def unique_address(test_id: str, *, domain: str, worker: str | None = None) -> s
     """
     if not domain or "@" in domain or domain.strip() != domain:
         raise ValueError(f"Expected a domain such as example.com, got {domain!r}")
-    test = hashlib.sha256(test_id.encode()).hexdigest()[:6]
+    test = nodeid_hash(test_id)
     # pytest-xdist names workers "gw0", "gw1", ...; anything else is cut short.
     worker_part = re.sub(r"[^a-z0-9]", "", (worker or "").lower())[:16]
     parts = ["pytest", worker_part, test, secrets.token_hex(4)]

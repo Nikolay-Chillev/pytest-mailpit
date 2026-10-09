@@ -280,7 +280,7 @@ It covers searching, reading whole messages, headers, the raw source and parts, 
 
 ### Settings
 
-Command line options win over environment variables, which win over ini settings.
+Command line options win over environment variables, which win over ini settings. So `--mailpit-url` or `MAILPIT_URL` turns off a `mailpit_container = true` of the ini file, and `--mailpit-container` wins over `MAILPIT_URL`.
 
 | Setting | Option | Environment | ini (`pytest.ini`, `[tool.pytest.ini_options]`) | Default |
 |---|---|---|---|---|
@@ -294,7 +294,7 @@ Command line options win over environment variables, which win over ini settings
 | Tag them with the test's name | | | `mailpit_tag_failures` | `true` |
 | List and attach a failed test's messages in reports | | | `mailpit_report_messages` | `true` |
 | When Mailpit cannot be reached: `fail` or `skip` | | | `mailpit_unreachable` | `fail` |
-| Mailpit's SMTP server, for `mailpit_smtp` | | `MAILPIT_SMTP` | `mailpit_smtp` | `localhost:1025` |
+| Mailpit's SMTP server, for `mailpit_smtp` | | `MAILPIT_SMTP` | `mailpit_smtp` | the URL's host, port `1025` |
 | Start Mailpit in a Docker container for the session | `--mailpit-container` | | `mailpit_container` | `false` |
 | The image of that container | | | `mailpit_container_image` | `axllent/mailpit` |
 
@@ -327,10 +327,10 @@ Messages to pytest-3f9a2c-7b1e4d9a@example.com (1):
   Received (UTC)  To                                  Subject
   09:14:03        pytest-3f9a2c-7b1e4d9a@example.com  Welcome to the shop
 Mailpit: http://localhost:8025/
-Tagged 'failed test_sign_up': http://localhost:8025/search?q=tag%3A%22failed%20test_sign_up%22
+Tagged 'failed 3f9a2c test_sign_up': http://localhost:8025/search?q=tag%3A%22failed%203f9a2c%20test_sign_up%22
 ```
 
-The kept messages are tagged with the test's name, such as `failed test_sign_up`, and the link opens them in Mailpit's web UI; tags the application gave them stay. Set `mailpit_tag_failures = false` to leave the tags alone.
+The kept messages are tagged with the test's hash, the one in its inbox addresses, and its name, such as `failed 3f9a2c test_sign_up`, and the link opens them in Mailpit's web UI. The hash keeps apart tests with the same name in two files, or with names in another alphabet; tags the application gave them stay. Set `mailpit_tag_failures = false` to leave the tags alone.
 
 With [Allure](https://allurereport.org/docs/pytest/) (`--alluredir`) or [pytest-html](https://pytest-html.readthedocs.io/) (`--html`), the emails themselves are attached too, so a CI report keeps them after Mailpit is gone:
 

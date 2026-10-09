@@ -21,7 +21,7 @@ or `pytest --mailpit-container` for a single run.
 - The container starts the first time a test needs Mailpit, and stops at the end of the session. Under pytest-xdist every worker gets its own.
 - `mailpit_config`, the `mailpit` client and every `mailpit_inbox` use the container's URL, on a random host port, so tests never depend on 8025 being free.
 - `mailpit_smtp` is the host and port where the application under test sends its email; [`test_login_code.py`](test_login_code.py) emails a one-time code there and reads it back with `message.code()`.
-- The container runs with Chaos enabled, for `mailpit_chaos`, without reverse DNS lookups, which delay messages inside containers, and without asking GitHub for Mailpit's latest release.
+- The container runs with Chaos enabled, for `mailpit_chaos`, without reverse DNS lookups, which delay messages inside containers, and without asking GitHub for Mailpit's latest release. It is a plain Mailpit, as `docker run axllent/mailpit` gives: no STARTTLS, whose self-signed certificate some SMTP clients would refuse, and an SMTP login that accepts any user.
 - `mailpit_container_image` picks the image, for example `axllent/mailpit:v1.31.4` to pin a version.
 
 ## Your own container

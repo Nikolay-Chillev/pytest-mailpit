@@ -66,7 +66,7 @@ def test_a_fixture_that_fails_in_its_setup_keeps_and_reports_the_messages(
     result.assert_outcomes(errors=1)
     assert deleted(server) == []
     result.stdout.fnmatch_lines(
-        ["*Mailpit messages to pytest-*", "Tagged 'failed test_profile': *"]
+        ["*Mailpit messages to pytest-*", "Tagged 'failed ?????? test_profile': *"]
     )
 
 

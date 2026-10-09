@@ -103,11 +103,13 @@ def test_defaults(pytester: pytest.Pytester, server: responses.RequestsMock) -> 
 
 
 def test_ini_settings(pytester: pytest.Pytester, server: responses.RequestsMock) -> None:
+    ca = pytester.path / "ca.pem"
+    ca.write_text("-----BEGIN CERTIFICATE-----")
     pytester.makeini(
-        """
+        f"""
         [pytest]
         mailpit_url = http://mailpit.test:8025/mailpit/
-        mailpit_verify = /etc/ssl/ca.pem
+        mailpit_verify = {ca}
         mailpit_wait_timeout = 30
         mailpit_poll_interval = 0.25
         mailpit_domain = shop.test
@@ -116,13 +118,15 @@ def test_ini_settings(pytester: pytest.Pytester, server: responses.RequestsMock)
         """
     )
     pytester.makepyfile(
-        """
-        from pytest_mailpit import MailpitConfig
+        f"""
+        from pytest_mailpit import MailpitConfig, SMTPServer
 
         def test_config(mailpit_config):
             assert mailpit_config == MailpitConfig(
                 url="http://mailpit.test:8025/mailpit/",
-                verify="/etc/ssl/ca.pem",
+                verify={str(ca)!r},
+                # On the host of the web UI, unless MAILPIT_SMTP says otherwise.
+                smtp=SMTPServer("mailpit.test", 1025),
                 wait_timeout=30,
                 poll_interval=0.25,
                 domain="shop.test",

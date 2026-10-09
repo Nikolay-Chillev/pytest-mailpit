@@ -11,6 +11,7 @@ from requests import PreparedRequest
 
 from pytest_mailpit import MailpitClient
 from pytest_mailpit._reporting import MAX_TAG_LENGTH, failure_tag
+from pytest_mailpit.inbox import nodeid_hash
 from tests.test_waiting import page, summary
 
 URL = "http://localhost:8025/"
@@ -20,17 +21,29 @@ FAILING = "def test_fails(mailpit_inbox): assert False"
 
 
 @pytest.mark.parametrize(
-    ("nodeid", "tag"),
+    ("nodeid", "name"),
     [
-        ("tests/test_shop.py::test_sign_up", "failed test_sign_up"),
-        ("tests/test_shop.py::TestCart::test_total[en-US/2]", "failed TestCart test_total en-US 2"),
-        ("test_вход.py::test_вход", "failed test_"),
-        ("t.py::test_" + "x" * 200, ("failed test_" + "x" * 200)[:MAX_TAG_LENGTH]),
+        ("tests/test_shop.py::test_sign_up", "test_sign_up"),
+        ("tests/test_shop.py::TestCart::test_total[en-US/2]", "TestCart test_total en-US 2"),
+        # Mailpit's tags hold only ASCII, and "@" not before 1.28.3.
+        ("test_вход.py::test_вход[ivan@example.com]", "test_ ivan example.com"),
     ],
 )
-def test_the_tag_names_the_test_as_mailpit_allows(nodeid: str, tag: str) -> None:
-    assert failure_tag(nodeid) == tag
-    assert re.fullmatch(r"[a-zA-Z0-9\-_.@ ]{1,100}", failure_tag(nodeid))
+def test_the_tag_names_the_test_as_mailpit_allows(nodeid: str, name: str) -> None:
+    assert failure_tag(nodeid) == f"failed {nodeid_hash(nodeid)} {name}"
+    assert re.fullmatch(r"[a-zA-Z0-9\-_. ]{1,100}", failure_tag(nodeid))
+
+
+def test_a_long_name_is_cut_to_what_mailpit_keeps() -> None:
+    assert len(failure_tag("t.py::test_" + "x" * 200)) == MAX_TAG_LENGTH
+
+
+def test_tests_that_share_a_name_get_different_tags() -> None:
+    # The same name in two files, or two names in another alphabet.
+    assert failure_tag("tests/api/test_users.py::test_create") != failure_tag(
+        "tests/ui/test_users.py::test_create"
+    )
+    assert failure_tag("t.py::test_вход") != failure_tag("t.py::test_изход")
 
 
 def test_set_tags_replaces_the_tags_of_the_messages() -> None:
@@ -87,6 +100,12 @@ def tagged(server: responses.RequestsMock) -> list[object]:
     ]
 
 
+# The hash of the inner session's test, test_fails in a file named after the outer test.
+HASH = nodeid_hash(
+    "test_a_failed_tests_messages_are_tagged_and_the_report_links_to_them.py::test_fails"
+)
+
+
 def test_a_failed_tests_messages_are_tagged_and_the_report_links_to_them(
     pytester: pytest.Pytester, server: responses.RequestsMock
 ) -> None:
@@ -96,13 +115,14 @@ def test_a_failed_tests_messages_are_tagged_and_the_report_links_to_them(
 
     result.assert_outcomes(failed=1)
     # The tag the application gave the message stays.
-    assert tagged(server) == [{"IDs": ["m1"], "Tags": ["orders", "failed test_fails"]}]
+    [call] = tagged(server)
+    assert call == {"IDs": ["m1"], "Tags": ["orders", f"failed {HASH} test_fails"]}
     result.stdout.fnmatch_lines(
         [
             "*Mailpit messages to pytest-*",
             "Mailpit: http://localhost:8025/",
-            "Tagged 'failed test_fails': "
-            "http://localhost:8025/search?q=tag%3A%22failed%20test_fails%22",
+            f"Tagged 'failed {HASH} test_fails': "
+            f"http://localhost:8025/search?q=tag%3A%22failed%20{HASH}%20test_fails%22",
         ]
     )
 

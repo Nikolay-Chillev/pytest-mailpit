@@ -340,3 +340,14 @@ def test_an_invalid_trigger_never_reaches_mailpit(
         MailpitClient(URL).set_chaos(ChaosTriggers(recipient=ChaosTrigger(code, probability)))
 
     assert fake.puts == []
+
+
+def test_one_worker_alone_gets_no_warning(
+    pytester: pytest.Pytester, fake: FakeChaos, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # pytest -n 1, or -n auto on a runner with one CPU.
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+    monkeypatch.setenv("PYTEST_XDIST_WORKER_COUNT", "1")
+    pytester.makepyfile("def test_chaos(mailpit_chaos): pass")
+
+    pytester.runpytest().assert_outcomes(passed=1, warnings=0)

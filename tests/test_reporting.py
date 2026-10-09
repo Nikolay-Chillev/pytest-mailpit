@@ -29,9 +29,13 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def mailpit_with(
-    messages_per_inbox: int = 1, html_part: str | None = None, subject: str | None = None
+    messages_per_inbox: int = 1,
+    html_part: str | None = None,
+    subject: str | None = None,
+    missing: str | None = None,
 ) -> responses.RequestsMock:
-    """A mocked Mailpit where every inbox has ``messages_per_inbox`` messages."""
+    """A mocked Mailpit where every inbox has ``messages_per_inbox`` messages;
+    the message with the ID ``missing`` is gone by the time it is fetched."""
 
     def search(request: PreparedRequest) -> tuple[int, dict[str, str], str]:
         query = parse_qs(urlsplit(request.url or "").query)["query"][0]
@@ -45,6 +49,8 @@ def mailpit_with(
         return 200, {"Content-Type": "application/json"}, json.dumps(page(*found))
 
     def message(request: PreparedRequest) -> tuple[int, dict[str, str], str]:
+        if (request.url or "").endswith(f"/{missing}"):
+            return 404, {}, "message not found"
         data = samples.MESSAGE | {"ID": (request.url or "").rsplit("/", 1)[1]}
         if html_part is not None:
             data["HTML"] = html_part
@@ -167,6 +173,23 @@ def test_a_subject_with_markup_stays_text_in_pytest_html(pytester: pytest.Pytest
     extras = pytest_html_extras(pytester.path / "report.html")
     [link] = [extra for extra in extras if extra["format_type"] == "url"]
     assert link["name"] == "Mailpit: Welcome, &lt;img src=x onerror=alert(1)&gt;"
+
+
+def test_a_message_gone_meanwhile_leaves_the_rest_of_the_report(
+    pytester: pytest.Pytester,
+) -> None:
+    # Pruned by MP_MAX_MESSAGES between the listing and the fetch, for example.
+    pytester.makepyfile(FAILING_TEST)
+
+    with mailpit_with(messages_per_inbox=2, missing="m1"):
+        result = pytester.runpytest("--alluredir=allure-results")
+
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(
+        ["Messages to pytest-*", "*", "*", "*", "Mailpit: *", "Could not attach 'Hello': *404*"]
+    )
+    attachments = allure_attachments(pytester.path / "allure-results")
+    assert len([a for a in attachments if a["name"].startswith("Email source")]) == 1
 
 
 # What is not done
