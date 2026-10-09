@@ -5,7 +5,12 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def test_the_plugin_starts_mailpit_in_a_container(pytester: pytest.Pytester) -> None:
+def test_the_plugin_starts_mailpit_in_a_container(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # MAILPIT_URL, which CI sets for the other integration tests, would turn the container off.
+    monkeypatch.delenv("MAILPIT_URL", raising=False)
+    monkeypatch.delenv("MAILPIT_SMTP", raising=False)
     pytester.makeini("[pytest]\nmailpit_container = true\n")
     pytester.makepyfile(
         """

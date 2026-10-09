@@ -1,11 +1,14 @@
 """The plugin end to end: inner pytest sessions that send real email to a real Mailpit."""
 
 import json
+import re
 import uuid
+from urllib.parse import quote
 
 import pytest
 
 from pytest_mailpit import MailpitClient, build_query
+from pytest_mailpit._reporting import failure_tag
 
 pytestmark = pytest.mark.integration
 
@@ -125,7 +128,7 @@ def test_a_failed_test_keeps_its_messages_and_shows_them(
 def test_a_failed_tests_messages_are_tagged_with_its_name(
     pytester: pytest.Pytester, client: MailpitClient, domain: str
 ) -> None:
-    pytester.makepyfile(
+    path = pytester.makepyfile(
         """
         import os
         import smtplib
@@ -152,13 +155,13 @@ def test_a_failed_tests_messages_are_tagged_with_its_name(
     result = pytester.runpytest()
 
     result.assert_outcomes(failed=1)
+    tag = failure_tag(f"{path.name}::test_wrong_email")
+    assert re.fullmatch(r"failed [0-9a-f]{6} test_wrong_email", tag)
     [kept] = client.search_all(build_query(addressed=domain))
-    assert set(kept.tags) == {"signup", "failed test_wrong_email"}
+    assert set(kept.tags) == {"signup", tag}
     # The report's link searches Mailpit for the tag, and finds the message.
-    result.stdout.fnmatch_lines(
-        ["Tagged 'failed test_wrong_email': *search?q=tag%3A%22failed%20test_wrong_email%22"]
-    )
-    found = client.search_all(build_query(tag="failed test_wrong_email"))
+    result.stdout.fnmatch_lines([f"Tagged '{tag}': *search?q=tag%3A%22{quote(tag)}%22"])
+    found = client.search_all(build_query(tag=tag))
     assert kept.id in [summary.id for summary in found]
 
 
