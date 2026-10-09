@@ -6,11 +6,44 @@ in any release.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-09
+
 ### Fixed
+
+#### Mailpit's API
 
 - Requests to Mailpit no longer follow redirects. Behind a proxy that redirected, for example from http:// to https://, a 301 made the cleanup after every passing test delete every message in Mailpit, because requests sent the DELETE again without its list of IDs. A 302 turned deletes, tags and Chaos changes into GET requests that did nothing. A redirect is now an error that names the URL to use, and the check at the start of the session catches it before any test runs.
 - The plugin no longer calls `/api/v1/info`. Before it answers, Mailpit asks GitHub for its latest release; where outbound connections hang, that took 10 s, as long as the client's timeout, so every test failed with "Cannot reach Mailpit" although Mailpit was up, and Mailpit's SMTP server waited meanwhile. The check at the start of the session and the 450-message warning use `/api/v1/messages`, and a Mailpit older than 1.22 is recognised by its missing `/api/v1/chaos`. `MailpitClient.info()` still works and says this in its docstring.
+- The link and HTML checks wait up to 120 s. Mailpit answers a link check only after a HEAD request to every link, of up to 10 s each, so one link that did not answer made `assert_links_work()` fail with "Cannot reach Mailpit". A request that Mailpit took but did not answer in time now says it "did not answer ... within N s".
+- `MAILPIT_VERIFY`, and `verify` of `MailpitClient`, now apply when `REQUESTS_CA_BUNDLE` or `CURL_CA_BUNDLE` is set; requests used to replace them with those. With verification off, urllib3 no longer warns on every request.
+- `server_time()` waits until Mailpit's clock reaches the next second, up to a second. Mailpit's clock reads only to the second, so as `since` it let in a message from earlier in the same second.
+- A single string where a list belongs raises `TypeError`: `assert_links_work(ignore="linkedin.com")` ignored every link with one of its letters, and so hid every broken link; `set_tags(ids, "urgent")` set six tags; and the async client's `delete_messages("id")` sent each character as an ID.
+
+#### The plugin
+
+- A failure in a fixture's setup or teardown keeps the test's messages, tags them and lists them in the report, as a failure of the test does. When a fixture that uses an inbox failed in its teardown, the messages used to be deleted. An interrupted run keeps them too, and a rerun by pytest-rerunfailures starts afresh.
+- `mailpit_chaos` restores only the triggers its test changed, and only if nothing changed them since. Two Chaos tests of different pytest-xdist workers that overlapped could leave errors on after the run. A timed-out wait now says when Chaos is rejecting messages.
+- `mailpit_container`: Testcontainers' own deprecation warnings no longer end the start under `-W error`, a container whose start failed half way is stopped, and `mailpit_unreachable = skip` also covers a container that cannot start.
 - The container of `mailpit_container` runs with `MP_DISABLE_VERSION_CHECK=true`.
+- `@pytest.mark.mailpit(timeout=0)` checks once, instead of waiting the default timeout.
+- The email's subject is escaped in pytest-html's link, where markup in it ran when the report was opened.
+
+#### Django
+
+- `mailpit_django` uses `MAILERS` only when a Django 6.1 project defines it. Projects still on the `EMAIL_*` settings, which 6.1 supports until 2028, broke: `settings.EMAIL_HOST_USER` raised and `get_connection(backend)` failed.
+- `mailpit_django` leaves `EMAIL_HOST_USER`, the password and the TLS settings as they are, so a sender taken from `EMAIL_HOST_USER` no longer becomes `DEFAULT_FROM_EMAIL`. The connection to Mailpit leaves the login and TLS out instead.
+- Django 6.1's deprecation warnings about the `EMAIL_*` settings no longer come out of pytest-mailpit; under `-W error`, the hint after a timed-out wait replaced the failure. Without configured settings, `mailpit_django` says what to do.
+
+#### Links and codes
+
+- `code()` finds the code in ordinary one-time-code emails. Years, dates, prices, durations, phone numbers and reference or order numbers next to the code, or in a footer, made it fail with several candidates. HTML now gets a line per block, codes on a keyword's line or alone on a line next to one come first, and the HTML is read when the text part has no code.
+- `link(text=...)` finds a link whose URL appears earlier with another text, such as a logo; an image's alt text counts as the text of its link, and a failure lists every text.
+- A template placeholder such as `https://[url]` no longer makes `links()` raise, and an unclosed `<head>` no longer hides the body. URLs in text end at typographic quotes, an em dash or a zero-width space, and keep a `)` that closes a `(`. A `pattern=` group that takes no part in a match is skipped.
+
+#### Packaging
+
+- The sdist no longer contains ten files of the examples without the applications they test.
+- Releases are published only after the whole CI has passed on the tagged commit, which must be on main.
 
 ## [0.4.0] - 2026-10-08
 
@@ -75,7 +108,8 @@ The first release.
 - **Links and one-time codes** found in a message's HTML and text.
 - **`MailpitClient`**, a typed client for Mailpit's API: search, messages, headers, raw source, parts, deleting, read status and server time; it works under a web root, with basic auth and custom TLS verification.
 
-[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Nikolay-Chillev/pytest-mailpit/compare/v0.1.0a1...v0.2.0
