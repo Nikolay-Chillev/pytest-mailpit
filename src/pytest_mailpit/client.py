@@ -390,6 +390,29 @@ class MailpitClient:
             f"{message_table(page.messages[::-1])}"
         )
 
+    def _chaos_hint(self) -> str:
+        """For a message that did not arrive: whether Mailpit's Chaos is rejecting messages."""
+        try:
+            triggers = self.chaos()
+        except MailpitError:
+            return ""  # Chaos is off (HTTP 400), or Mailpit is older than 1.22
+        rejected = [
+            f"{what} ({trigger.error_code}, {trigger.probability}%)"
+            for what, trigger in (
+                ("senders", triggers.sender),
+                ("recipients", triggers.recipient),
+                ("authentication", triggers.authentication),
+            )
+            if trigger.active
+        ]
+        if not rejected:
+            return ""
+        return (
+            f"Mailpit's Chaos is rejecting {' and '.join(rejected)}, so the email may never have "
+            "arrived. If a Chaos test left it on, turn it off with "
+            "mailpit.set_chaos(ChaosTriggers())."
+        )
+
     # Changing
 
     def delete_messages(self, message_ids: Iterable[str]) -> None:
@@ -549,10 +572,15 @@ class _Wait:
         if self.remaining() > 0:
             return None
         arrived = f"{len(found)} arrived" if found else "none arrived"
-        hint = outbox_hint()
+        hints = [hint for hint in (outbox_hint(), self.client._chaos_hint()) if hint]
         return _Failed(
-            f"Expected {expected} within {self.timeout:g}s, {arrived}.\n"
-            f"{self.client._what_arrived(self.criteria)}" + (f"\n{hint}" if hint else "")
+            "\n".join(
+                [
+                    f"Expected {expected} within {self.timeout:g}s, {arrived}.",
+                    self.client._what_arrived(self.criteria),
+                    *hints,
+                ]
+            )
         )
 
     def remaining(self) -> float:

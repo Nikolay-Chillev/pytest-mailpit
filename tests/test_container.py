@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import types
+import warnings
 from collections.abc import Iterator
 from typing import Any, ClassVar
 from urllib.parse import parse_qs, urlsplit
@@ -24,6 +25,10 @@ class FakeContainer:
 
     instances: ClassVar[list["FakeContainer"]] = []
     fail_with: ClassVar[Exception | None] = None
+    # Testcontainers 4.15 warns from MailpitContainer.start(), after the container started.
+    deprecated: ClassVar[bool] = False
+    fail_after_start: ClassVar[Exception | None] = None
+    stop_fails: ClassVar[bool] = False
 
     def __init__(self, image: str) -> None:
         self.image = image
@@ -39,10 +44,22 @@ class FakeContainer:
         if FakeContainer.fail_with is not None:
             raise FakeContainer.fail_with
         self.started = True
+        if FakeContainer.deprecated:
+            warnings.warn_explicit(
+                "The wait_for_logs function with string or callable predicates is deprecated",
+                DeprecationWarning,
+                "waiting_utils.py",
+                300,
+                module="testcontainers.core.waiting_utils",
+            )
+        if FakeContainer.fail_after_start is not None:
+            raise FakeContainer.fail_after_start
         return self
 
     def stop(self) -> None:
         self.stopped = True
+        if FakeContainer.stop_fails:
+            raise RuntimeError("the container is gone already")
 
     def get_base_api_url(self) -> str:
         return URL.rstrip("/")
@@ -63,6 +80,9 @@ def fake_testcontainers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "testcontainers.community.mailpit", module)
     monkeypatch.setattr(FakeContainer, "instances", [])
     monkeypatch.setattr(FakeContainer, "fail_with", None)
+    monkeypatch.setattr(FakeContainer, "deprecated", False)
+    monkeypatch.setattr(FakeContainer, "fail_after_start", None)
+    monkeypatch.setattr(FakeContainer, "stop_fails", False)
 
 
 @pytest.fixture
@@ -203,6 +223,41 @@ def test_a_container_full_of_kept_messages_needs_no_warning(
     pytester.makepyfile("def test_fails(mailpit_inbox): assert False")
 
     pytester.runpytest().assert_outcomes(failed=1, warnings=0)
+
+
+def test_testcontainers_deprecations_do_not_stop_a_run_with_warnings_as_errors(
+    pytester: pytest.Pytester, mailpit_api: responses.RequestsMock
+) -> None:
+    FakeContainer.deprecated = True
+    pytester.makeini("[pytest]\nmailpit_container = true\nfilterwarnings = error\n")
+    pytester.makepyfile(USES_THE_CONTAINER)
+
+    pytester.runpytest().assert_outcomes(passed=2)
+
+
+@pytest.mark.parametrize("stop_fails", [False, True])
+def test_a_container_that_fails_after_it_started_is_stopped(
+    pytester: pytest.Pytester, stop_fails: bool
+) -> None:
+    FakeContainer.fail_after_start = RuntimeError("Mailpit did not log 'accessible via' in time")
+    FakeContainer.stop_fails = stop_fails
+    pytester.makeini("[pytest]\nmailpit_container = true\n")
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
+
+    result = pytester.runpytest()
+
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*Could not start Mailpit*did not log 'accessible via' in time*"])
+    [container] = FakeContainer.instances
+    assert container.stopped
+
+
+def test_a_container_that_cannot_start_can_skip_the_tests(pytester: pytest.Pytester) -> None:
+    FakeContainer.fail_with = RuntimeError("Error while fetching server API version")
+    pytester.makeini("[pytest]\nmailpit_container = true\nmailpit_unreachable = skip\n")
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass\ndef test_other(): pass")
+
+    pytester.runpytest().assert_outcomes(passed=1, skipped=1)
 
 
 def test_the_container_fixture_needs_the_setting(pytester: pytest.Pytester) -> None:

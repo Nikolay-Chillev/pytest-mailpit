@@ -21,6 +21,8 @@ class Chaos:
 
     def __init__(self, client: MailpitClient) -> None:
         self._client = client
+        # What this object set last for each trigger, so _restore() puts back only those.
+        self._set_here: dict[str, ChaosTrigger] = {}
 
     def __repr__(self) -> str:
         return f"Chaos({self._client.url!r})"
@@ -45,11 +47,35 @@ class Chaos:
 
     def reset(self) -> None:
         """Turn every error off."""
-        self._client.set_chaos(ChaosTriggers())
+        off = ChaosTriggers()
+        self._client.set_chaos(off)
+        self._set_here.update(
+            sender=off.sender, recipient=off.recipient, authentication=off.authentication
+        )
 
     def _set(self, **changes: ChaosTrigger) -> None:
         # Mailpit replaces all the triggers at once, so the others are sent unchanged.
         self._client.set_chaos(dataclasses.replace(self.triggers, **changes))
+        self._set_here.update(changes)
+
+    def _restore(self, original: ChaosTriggers) -> None:
+        """Give each trigger set here its ``original`` value, unless it was changed since.
+
+        Another test, in another pytest-xdist worker for example, may have set
+        triggers in the meantime: putting back all of ``original`` would undo
+        them, or turn an error that test set back on after it ended.
+        """
+        if not self._set_here:
+            return
+        now = self.triggers
+        restore = {
+            name: getattr(original, name)
+            for name, mine in self._set_here.items()
+            if getattr(now, name) == mine
+        }
+        if restore:
+            self._client.set_chaos(dataclasses.replace(now, **restore))
+        self._set_here.clear()
 
 
 def _trigger(code: int, probability: int) -> ChaosTrigger:

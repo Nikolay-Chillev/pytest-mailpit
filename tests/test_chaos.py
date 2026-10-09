@@ -1,6 +1,7 @@
 """Chaos: the client's API calls, the Chaos helper and the mailpit_chaos fixture."""
 
 import json
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -8,8 +9,16 @@ import pytest
 import responses
 from requests import PreparedRequest
 
-from pytest_mailpit import Chaos, ChaosTrigger, ChaosTriggers, MailpitAPIError, MailpitClient
+from pytest_mailpit import (
+    Chaos,
+    ChaosTrigger,
+    ChaosTriggers,
+    MailpitAPIError,
+    MailpitAssertionError,
+    MailpitClient,
+)
 from tests import samples
+from tests.test_waiting import page
 
 URL = "http://localhost:8025/"
 CHAOS = f"{URL}api/v1/chaos"
@@ -67,6 +76,7 @@ def fake() -> Iterator[FakeChaos]:
     fake = FakeChaos()
     with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
         mock.get(f"{URL}api/v1/messages", json=samples.MESSAGE_LIST)
+        mock.get(re.compile(re.escape(f"{URL}api/v1/search") + ".*"), json=page())
         mock.add_callback(responses.GET, CHAOS, fake.get)
         mock.add_callback(responses.PUT, CHAOS, fake.put)
         yield fake
@@ -160,6 +170,63 @@ def test_invalid_errors_never_reach_mailpit(
         chaos.reject_recipients(code, probability=probability)
 
     assert fake.puts == []
+
+
+def test_overlapping_chaos_tests_leave_mailpit_as_it_was(fake: FakeChaos) -> None:
+    # Two pytest-xdist workers sharing one Mailpit: the second test starts while the
+    # first one's error is on, so the error is part of what it found.
+    client = MailpitClient(URL)
+    first, second = Chaos(client), Chaos(client)
+    before_first = client.chaos()
+    first.reject_recipients(451)
+    before_second = client.chaos()
+
+    first._restore(before_first)
+    second._restore(before_second)
+
+    assert client.chaos() == ChaosTriggers()
+
+
+def test_a_trigger_changed_since_is_left_alone(fake: FakeChaos, chaos: Chaos) -> None:
+    client = MailpitClient(URL)
+    before = client.chaos()
+    chaos.reject_senders()
+    another_test = ChaosTriggers(sender=ChaosTrigger(554, 100))
+    client.set_chaos(another_test)
+
+    chaos._restore(before)
+
+    assert client.chaos() == another_test
+
+
+def test_nothing_set_means_nothing_to_restore(fake: FakeChaos, chaos: Chaos) -> None:
+    chaos._restore(ChaosTriggers(sender=ChaosTrigger(421, 5)))
+
+    assert fake.puts == []
+
+
+def test_a_timed_out_wait_says_that_chaos_rejects_messages(fake: FakeChaos) -> None:
+    fake.triggers["Recipient"] = {"ErrorCode": 550, "Probability": 100}
+    fake.triggers["Sender"] = {"ErrorCode": 451, "Probability": 30}
+
+    with pytest.raises(MailpitAssertionError) as failure:
+        MailpitClient(URL).wait_for_message(recipient="new@example.com", timeout=0)
+
+    assert str(failure.value).endswith(
+        "\nMailpit's Chaos is rejecting senders (451, 30%) and recipients (550, 100%), so the "
+        "email may never have arrived. If a Chaos test left it on, turn it off with "
+        "mailpit.set_chaos(ChaosTriggers())."
+    )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_no_chaos_hint_when_chaos_rejects_nothing(fake: FakeChaos, enabled: bool) -> None:
+    fake.enabled = enabled
+
+    with pytest.raises(MailpitAssertionError) as failure:
+        MailpitClient(URL).wait_for_message(recipient="new@example.com", timeout=0)
+
+    assert "Chaos" not in str(failure.value)
 
 
 def test_chaos_names_its_server(chaos: Chaos) -> None:

@@ -1,5 +1,7 @@
 """Mailpit in a Docker container for the test session, through Testcontainers."""
 
+import contextlib
+import warnings
 from typing import Any
 
 # Settings of the container: no reverse DNS lookups, which delay every message
@@ -34,4 +36,19 @@ def start_container(image: str) -> Any:
     container = container_class()(image)
     for name, value in CONTAINER_ENV.items():
         container = container.with_env(name, value)
-    return container.start()
+    try:
+        with warnings.catch_warnings():
+            # Testcontainers' own deprecations, such as of wait_for_logs() in
+            # MailpitContainer.start(): with -W error they would end the start
+            # after the container is running.
+            warnings.filterwarnings("ignore", category=DeprecationWarning, module="testcontainers")
+            return container.start()
+    except BaseException:
+        _stop(container)  # it may be running already
+        raise
+
+
+def _stop(container: Any) -> None:
+    # If even that fails, Testcontainers' Ryuk removes the container when pytest exits.
+    with contextlib.suppress(Exception):
+        container.stop()
