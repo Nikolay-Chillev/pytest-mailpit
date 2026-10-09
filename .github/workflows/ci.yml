@@ -63,6 +63,20 @@ jobs:
       - run: python -m coverage run -m pytest
       - run: python -m coverage report
 
+  # The oldest supported Python with the oldest supported dependencies.
+  minimum:
+    name: Tests (minimum versions)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e . --group dev -c .github/minimum-versions.txt
+      - run: python -m pytest
+
   # Service containers only run on Linux runners, so the tests against a real Mailpit run on Ubuntu.
   integration:
     name: Integration (Mailpit ${{ matrix.mailpit }})
@@ -165,7 +179,7 @@ jobs:
   ci-passed:
     name: CI passed
     if: ${{ always() }}
-    needs: [lint, test, integration, examples, frameworks]
+    needs: [lint, test, minimum, integration, examples, frameworks]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

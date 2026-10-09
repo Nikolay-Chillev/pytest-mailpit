@@ -74,7 +74,7 @@ ATTACHMENT = Attachment(
         ),
         ("check_html", ("m1",), {}, ("check_html", ("m1",), {})),
         ("get_attachment", (ATTACHMENT,), {}, ("get_attachment", (ATTACHMENT,), {})),
-        ("delete_messages", (iter(["a", "b"]),), {}, ("delete_messages", (["a", "b"],), {})),
+        ("delete_messages", (("a", "b"),), {}, ("delete_messages", (["a", "b"],), {})),
         ("delete_search", ("tag:x",), {}, ("delete_search", ("tag:x",), {})),
         ("delete_all", (), {}, ("delete_all", (), {})),
         ("mark_read", (("a",),), {"read": False}, ("mark_read", (["a"],), {"read": False})),
@@ -281,10 +281,8 @@ def test_the_async_inbox_lists_and_clears_its_messages() -> None:
 
 
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch) -> Iterator[responses.RequestsMock]:
+def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit at the default URL, holding one message for every inbox."""
-    for name in ("MAILPIT_URL", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
 
     def one_per_address(request: PreparedRequest) -> tuple[int, dict[str, str], str]:
         query = parse_qs(urlsplit(request.url or "").query)["query"][0]
@@ -331,3 +329,23 @@ def test_the_async_fixtures(pytester: pytest.Pytester, server: responses.Request
     result.stdout.fnmatch_lines(["*Mailpit messages to pytest-*@example.com*"])
     deleted = [call for call in server.calls if call.request.method == "DELETE"]
     assert len(deleted) == 1
+
+
+def test_async_waits_ask_mailpit_from_a_worker_thread() -> None:
+    threads: list[int] = []
+
+    def search(request: PreparedRequest) -> tuple[int, dict[str, str], str]:
+        threads.append(threading.get_ident())
+        return 200, {}, json.dumps(page(summary("m1", to=ADDRESS)))
+
+    async def wait() -> int:
+        await AsyncMailpitClient(URL).wait_for_message(recipient=ADDRESS)
+        return threading.get_ident()
+
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as mock:
+        mock.add_callback(responses.GET, SEARCH, callback=search)
+        mock.get(MESSAGE, json=samples.MESSAGE | {"ID": "m1"})
+        loop_thread = asyncio.run(wait())
+
+    assert threads
+    assert loop_thread not in threads

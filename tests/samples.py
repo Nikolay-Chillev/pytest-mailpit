@@ -76,7 +76,8 @@ INFO: dict[str, Any] = {
     "RuntimeStats": {"Uptime": 60},
 }
 
-# What an older Mailpit (v1.22) sends: no Username, and an unknown future field must not break.
+# Optional fields a server may leave out, such as Username, which Mailpit 1.22 does not
+# send, and a field from a future version: none of them may break the parsing.
 OLD_SUMMARY: dict[str, Any] = {
     key: value for key, value in SUMMARY.items() if key not in {"Username", "ReplyTo", "Snippet"}
 } | {"SomeFutureField": {"nested": True}}

@@ -40,12 +40,6 @@ EMAIL_SETTINGS = {
 }
 
 
-@pytest.fixture(autouse=True)
-def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("MAILPIT_URL", "MAILPIT_SMTP", "PYTEST_XDIST_WORKER"):
-        monkeypatch.delenv(name, raising=False)
-
-
 @pytest.fixture
 def server() -> Iterator[responses.RequestsMock]:
     """A mocked Mailpit without messages."""

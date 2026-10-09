@@ -1,0 +1,6 @@
+# The oldest versions pytest-mailpit supports, the lower bounds in pyproject.toml.
+# The "Tests (minimum versions)" job of ci.yml installs them.
+pytest==8.4.0
+requests==2.32.4
+testcontainers==4.8.0
+django==5.2

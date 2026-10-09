@@ -2,9 +2,12 @@
 
 import base64
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
-from playwright.sync_api import Page, sync_playwright
+
+if TYPE_CHECKING:
+    from playwright.sync_api import Page
 
 from pytest_mailpit import MailpitClient
 from tests.integration.conftest import SendEmail
@@ -18,8 +21,10 @@ PNG = base64.b64decode(
 
 
 @pytest.fixture
-def page() -> Iterator[Page]:
-    with sync_playwright() as playwright:
+def page() -> Iterator["Page"]:
+    # Imported here, so that collecting the tests needs no Playwright.
+    sync_api = pytest.importorskip("playwright.sync_api")
+    with sync_api.sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
             yield browser.new_page()
@@ -28,7 +33,7 @@ def page() -> Iterator[Page]:
 
 
 def test_open_the_email_and_click_its_button(
-    client: MailpitClient, send_email: SendEmail, recipient: str, page: Page, mailpit_url: str
+    client: MailpitClient, send_email: SendEmail, recipient: str, page: "Page", mailpit_url: str
 ) -> None:
     confirm = f"{mailpit_url}livez"
     send_email(
@@ -52,7 +57,7 @@ def test_open_the_email_and_click_its_button(
 
 
 def test_screenshot_of_the_email(
-    client: MailpitClient, send_email: SendEmail, recipient: str, page: Page
+    client: MailpitClient, send_email: SendEmail, recipient: str, page: "Page"
 ) -> None:
     send_email(recipient, html="<h1>Your order has shipped</h1>")
     message = client.wait_for_message(recipient=recipient)
