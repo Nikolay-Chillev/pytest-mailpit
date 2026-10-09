@@ -241,7 +241,7 @@ def test_sign_up(client, mailpit_inbox):
     assert response.status_code == 200
 ```
 
-It points every mailer in `MAILERS` at Mailpit on Django 6.1 and newer, and `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` on older versions, for one test. A test that waits for an email Django kept in memory fails with a hint to use it. Email that a Celery worker or a container sends reaches Mailpit through that process's own settings, without `mailpit_django`. The [Django example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django) runs in CI with Django 5.2 and 6.1.
+For one test, it points every mailer in `MAILERS` at Mailpit when the project defines that setting (Django 6.1), and otherwise `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT`, as Django's test runner decides. `EMAIL_HOST_USER` and the TLS settings keep their values, for code that reads them, such as a sender taken from `EMAIL_HOST_USER`; the connection to Mailpit just leaves out the login and TLS. A test that waits for an email Django kept in memory fails with a hint to use it. Email that a Celery worker or a container sends reaches Mailpit through that process's own settings, without `mailpit_django`. The [Django example](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django) runs in CI with Django 5.2 and 6.1.
 
 ### When sending fails
 

@@ -12,7 +12,7 @@ pytest
 
 - Django's test runner, and pytest-django, keep sent email in memory, in `django.core.mail.outbox`. The `mailpit_django` fixture sends the test's email over SMTP to Mailpit instead, so the test reads it with `mailpit_inbox` as the customer gets it: the MIME parts, the headers and the HTML, with Mailpit's link and HTML checks and the browser helpers.
 - [`tests/test_sign_up.py`](tests/test_sign_up.py) uses it for every test of the module, with `pytestmark = pytest.mark.usefixtures("mailpit_django")`.
-- On Django 6.1 and newer, every mailer in `MAILERS` goes to Mailpit; on older versions, `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` point at it. Login and TLS are off, since Mailpit needs neither. After the test, Django's settings are back as they were.
+- A project that defines `MAILERS` (Django 6.1) gets every mailer pointed at Mailpit. A project on `EMAIL_BACKEND` and the other `EMAIL_*` settings gets `EMAIL_BACKEND`, `EMAIL_HOST` and `EMAIL_PORT` pointed at it, through a backend that leaves out the login and TLS that Mailpit does not need. `EMAIL_HOST_USER` and the TLS settings keep their values, so a sender taken from them stays the same. After the test, Django's settings are back as they were.
 - `mailpit_smtp` (`MAILPIT_SMTP`, default `localhost:1025`) is where the email goes; with `mailpit_container = true` it is the container's SMTP port.
 
 For the whole test suite, add an autouse fixture to `conftest.py`:
