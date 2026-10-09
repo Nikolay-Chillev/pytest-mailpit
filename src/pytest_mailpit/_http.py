@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
+from requests.auth import HTTPBasicAuth
 from urllib3.exceptions import InsecureRequestWarning
 
 from pytest_mailpit.errors import MailpitAPIError, MailpitConnectionError
@@ -45,7 +46,9 @@ class Transport:
         self.verify = verify
         self.session = requests.Session()
         if username is not None:
-            self.session.auth = (username, password or "")
+            # As UTF-8, as browsers send it: requests would encode str as latin-1 and
+            # fail on any other letter.
+            self.session.auth = HTTPBasicAuth(username.encode(), (password or "").encode())
 
     def url(self, path: str) -> str:
         """Resolve ``path`` against Mailpit's URL; a leading slash is ignored."""
@@ -103,6 +106,22 @@ class Transport:
             content_type = response.headers.get("Content-Type") or "no content type"
             raise MailpitAPIError(
                 "GET",
+                _without_credentials(response.url),
+                response.status_code,
+                f"expected JSON, got {content_type}. Is {self.display_url} the URL of Mailpit?",
+            ) from None
+
+    def request_json(
+        self, method: str, path: str, *, json_body: Any = None, timeout: float | None = None
+    ) -> Any:
+        """A request whose answer must be Mailpit's JSON."""
+        response = self.request(method, path, json_body=json_body, timeout=timeout)
+        try:
+            return response.json()
+        except ValueError:
+            content_type = response.headers.get("Content-Type") or "no content type"
+            raise MailpitAPIError(
+                method,
                 _without_credentials(response.url),
                 response.status_code,
                 f"expected JSON, got {content_type}. Is {self.display_url} the URL of Mailpit?",

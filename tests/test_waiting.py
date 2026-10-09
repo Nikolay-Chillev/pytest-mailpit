@@ -338,7 +338,8 @@ def test_assert_no_message_shows_since_in_utc(
     mocked.get(SEARCH, json=page(summary("m1", created="2026-10-07T11:00:00Z")))
     since = datetime.fromisoformat("2026-10-07T13:59:00+03:00")
 
-    with pytest.raises(MailpitAssertionError, match=r'tag:"x" since 10:59:00 UTC, found 1'):
+    since_in_utc = r'tag:"x" since 2026-10-07 10:59:00\.000 UTC, found 1'
+    with pytest.raises(MailpitAssertionError, match=since_in_utc):
         client.assert_no_message(tag="x", since=since)
 
 

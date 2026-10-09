@@ -276,7 +276,7 @@ with MailpitClient("http://localhost:8025/") as mailpit:
     source = mailpit.get_raw(message.id)  # the .eml
 ```
 
-It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, tags (`set_tags()`), waiting and Chaos (`chaos()`, `set_chaos()`). `search_url()` and `view_url()` link to Mailpit's web UI. An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message.
+It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, tags (`set_tags()`), waiting and Chaos (`chaos()`, `set_chaos()`). `search_url()` and `view_url()` link to Mailpit's web UI. An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message, and neither does a `delete_search()` query whose every term Mailpit would drop, such as `to:` with an empty address.
 
 ### Settings
 
