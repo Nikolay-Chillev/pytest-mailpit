@@ -26,14 +26,17 @@ Container image                                                          ``mailp
 """
 
 import dataclasses
+import math
 import os
 import re
+import ssl
 import warnings
 from collections.abc import Callable, Generator, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+import requests
 
 from pytest_mailpit._container import start_container, testcontainers_installed
 from pytest_mailpit._django import email_settings, quiet_email_settings
@@ -59,7 +62,8 @@ OLDEST_SUPPORTED_VERSION = (1, 22)
 MAILPIT_DEFAULT_MAX_MESSAGES = 500
 
 _CONFIG = pytest.StashKey[MailpitConfig]()
-_REPORTS = pytest.StashKey[dict[str, pytest.TestReport]]()
+# Whether a test failed: in its setup, call or teardown, or in one of its subtests.
+_FAILED = pytest.StashKey[bool]()
 _INBOXES = pytest.StashKey[list[Inbox]]()
 # Whether a failed test kept its messages in Mailpit.
 _KEPT = pytest.StashKey[bool]()
@@ -152,7 +156,11 @@ def pytest_configure(config: pytest.Config) -> None:
         "mailpit(timeout=None): settings of pytest-mailpit for one test; "
         "timeout is how long mailpit_inbox waits for an email.",
     )
-    config.stash[_CONFIG] = load_config(config, os.environ)
+    if config.getoption("help", False) or config.getoption("version", 0):
+        # The help must show whatever the settings are, wrong ones included.
+        config.stash[_CONFIG] = MailpitConfig()
+    else:
+        config.stash[_CONFIG] = load_config(config, os.environ)
 
 
 def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitConfig:
@@ -179,7 +187,16 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         raise pytest.UsageError(
             f"mailpit_domain must be a domain such as example.com, got {domain!r}"
         )
-    container = bool(config.getoption("mailpit_container") or config.getini("mailpit_container"))
+    # The command line wins over the environment, which wins over the ini file:
+    # --mailpit-container over MAILPIT_URL, and a URL over mailpit_container = true.
+    container_option = bool(config.getoption("mailpit_container"))
+    if container_option and config.getoption("mailpit_url") is not None:
+        raise pytest.UsageError(
+            "--mailpit-container starts Mailpit in a Docker container, so it cannot go with "
+            "--mailpit-url"
+        )
+    explicit_url = config.getoption("mailpit_url") is not None or bool(environ.get("MAILPIT_URL"))
+    container = container_option or (bool(config.getini("mailpit_container")) and not explicit_url)
     if container and not testcontainers_installed():
         raise pytest.UsageError(
             "mailpit_container needs Testcontainers: pip install 'pytest-mailpit[testcontainers]'"
@@ -206,7 +223,11 @@ def load_config(config: pytest.Config, environ: Mapping[str, str]) -> MailpitCon
         tag_failures=bool(config.getini("mailpit_tag_failures")),
         report_messages=bool(config.getini("mailpit_report_messages")),
         skip_if_unreachable=unreachable == "skip",
-        smtp=_smtp(setting(None, "MAILPIT_SMTP", "mailpit_smtp"), defaults.smtp),
+        # By default, the SMTP server is on the host of the web UI.
+        smtp=_smtp(
+            setting(None, "MAILPIT_SMTP", "mailpit_smtp"),
+            SMTPServer(urlsplit(url).hostname or defaults.smtp.host, defaults.smtp.port),
+        ),
         container=container,
         container_image=setting(None, None, "mailpit_container_image") or defaults.container_image,
     )
@@ -234,7 +255,7 @@ def pytest_runtest_makereport(
 def pytest_runtest_setup(item: pytest.Item) -> None:
     # A fresh start for every run of a test, also a rerun by pytest-rerunfailures.
     keys: tuple[pytest.StashKey[Any], ...] = (
-        _REPORTS,
+        _FAILED,
         _INBOXES,
         _KEEP_ON_FAILURE,
         _TEARDOWN_FAILED,
@@ -266,7 +287,9 @@ def _record(item: pytest.Item, report: pytest.TestReport) -> None:
 
     The first failure counts, in the test's setup, call or teardown.
     """
-    item.stash.setdefault(_REPORTS, {})[report.when] = report
+    if report.failed:
+        # Sticky: pytest-subtests reports a test as passed after a failed subtest.
+        item.stash[_FAILED] = True
     inboxes = item.stash.get(_INBOXES, [])
     if not report.failed or not inboxes or item.stash.get(_REPORTED, False):
         return
@@ -320,10 +343,9 @@ def mailpit_container(pytestconfig: pytest.Config) -> Iterator[Any]:
     try:
         container = start_container(config.container_image)
     except Exception as error:  # Docker not running, image missing, ...
-        unreachable = (
-            f"Could not start Mailpit in a Docker container ({_root_cause(error)}). "
-            "Is Docker running?"
-        )
+        unreachable = f"Could not start Mailpit in a Docker container ({_first_line(error)})."
+        if _docker_is_down(error):
+            unreachable += " Is Docker running?"
     # Fail outside the except block, so pytest does not print the chain of Docker errors.
     if unreachable is not None:
         if config.skip_if_unreachable:
@@ -454,7 +476,8 @@ def mailpit_chaos(mailpit: MailpitClient, mailpit_config: MailpitConfig) -> Iter
     it had before, unless something else changed it in the meantime.
     """
     original = _chaos_triggers(mailpit)
-    if os.environ.get("PYTEST_XDIST_WORKER") and not mailpit_config.container:
+    workers = int(os.environ.get("PYTEST_XDIST_WORKER_COUNT") or 2)
+    if os.environ.get("PYTEST_XDIST_WORKER") and workers > 1 and not mailpit_config.container:
         warnings.warn(
             "mailpit_chaos makes Mailpit reject the messages of every pytest-xdist worker, "
             "not only this test's, and Chaos tests of two workers that change the same "
@@ -487,16 +510,35 @@ def _check_server(client: MailpitClient, config: MailpitConfig) -> None:
         # which takes up to 10 s where outbound connections hang (see MailpitClient.info).
         client.messages(limit=1)
     except MailpitConnectionError as error:
-        unreachable = (
-            f"Cannot reach Mailpit at {client.url} ({_root_cause(error)}).\n"
-            "Start Mailpit, for example: docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit\n"
-            "or point pytest-mailpit at it with --mailpit-url or MAILPIT_URL."
-        )
+        if _is_tls_error(error):
+            # Mailpit runs, but the setting is wrong: not a reason to skip the tests.
+            problem = (
+                f"Mailpit at {client.url} failed TLS verification ({_root_cause(error)}). "
+                "Set MAILPIT_VERIFY to the CA file of its certificate, or to false."
+            )
+        else:
+            unreachable = (
+                f"Cannot reach Mailpit at {client.url} ({_root_cause(error)}).\n"
+                "Start Mailpit, for example: "
+                "docker run -d -p 8025:8025 -p 1025:1025 axllent/mailpit\n"
+                "or point pytest-mailpit at it with --mailpit-url or MAILPIT_URL."
+            )
     except MailpitAPIError as error:
-        if error.status_code == 401:
+        if error.status_code == 401 and config.username is not None:
+            problem = (
+                f"Mailpit at {client.url} rejected the username and password "
+                "in MAILPIT_USERNAME and MAILPIT_PASSWORD."
+            )
+        elif error.status_code == 401:
             problem = (
                 f"Mailpit at {client.url} requires a username and password: "
                 "set MAILPIT_USERNAME and MAILPIT_PASSWORD."
+            )
+        elif error.status_code in (502, 503, 504):
+            # A proxy in front of Mailpit, which is down or starting.
+            unreachable = (
+                f"Cannot reach Mailpit at {client.url}: the server in front of it "
+                f"answered HTTP {error.status_code}. Is Mailpit running?"
             )
         else:
             problem = f"Mailpit at {client.url} cannot be used: {error}"
@@ -550,9 +592,7 @@ def _chaos_triggers(client: MailpitClient) -> ChaosTriggers:
 def _clean_up(item: pytest.Item, *, last: bool) -> None:
     """After a test's teardown: delete its messages, or keep them if it failed."""
     inboxes = item.stash.get(_INBOXES, [])
-    failed = item.stash.get(_TEARDOWN_FAILED, False) or any(
-        report.failed for report in item.stash.get(_REPORTS, {}).values()
-    )
+    failed = item.stash.get(_TEARDOWN_FAILED, False) or item.stash.get(_FAILED, False)
     if inboxes and failed and item.stash.get(_KEEP_ON_FAILURE, True):
         item.config.stash[_KEPT] = True
         return
@@ -586,6 +626,35 @@ def _warn_if_nearly_full(client: MailpitClient) -> None:
         )
 
 
+def _causes(error: BaseException) -> Iterator[BaseException]:
+    """The error and the chain of errors that caused it."""
+    seen: BaseException | None = error
+    while seen is not None:
+        yield seen
+        seen = seen.__cause__ or seen.__context__
+
+
+def _is_tls_error(error: BaseException) -> bool:
+    return any(
+        isinstance(cause, ssl.SSLError | requests.exceptions.SSLError) for cause in _causes(error)
+    )
+
+
+def _docker_is_down(error: BaseException) -> bool:
+    """Whether Docker did not answer at all, rather than refused, e.g. an image."""
+    return any(
+        isinstance(cause, ConnectionRefusedError | FileNotFoundError)
+        or "Error while fetching server API version" in str(cause)
+        for cause in _causes(error)
+    )
+
+
+def _first_line(error: BaseException) -> str:
+    """The first line of an error: docker-py puts the reason there, its cause has a URL only."""
+    text = str(error).strip()
+    return text.splitlines()[0] if text else type(error).__name__
+
+
 def _root_cause(error: BaseException) -> str:
     """The first line of the innermost cause of an error, e.g. "[Errno 111] Connection refused"."""
     while error.__cause__ is not None or error.__context__ is not None:
@@ -596,10 +665,24 @@ def _root_cause(error: BaseException) -> str:
 
 def _marker_timeout(node: pytest.Item | pytest.Collector) -> float | None:
     marker = node.get_closest_marker("mailpit")
-    if marker is None or marker.kwargs.get("timeout") is None:
+    if marker is None:
         return None
-    timeout = marker.kwargs["timeout"]
-    if isinstance(timeout, bool) or not isinstance(timeout, int | float) or timeout < 0:
+    if marker.args or set(marker.kwargs) - {"timeout"}:
+        # A positional timeout or a misspelled keyword would be ignored without a word.
+        given = [repr(arg) for arg in marker.args]
+        given += [f"{name}={value!r}" for name, value in marker.kwargs.items()]
+        raise pytest.UsageError(
+            f"@pytest.mark.mailpit takes only timeout=<seconds>, got mailpit({', '.join(given)})"
+        )
+    timeout = marker.kwargs.get("timeout")
+    if timeout is None:
+        return None
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, int | float)
+        or not math.isfinite(timeout)
+        or timeout < 0
+    ):
         raise pytest.UsageError(
             f"@pytest.mark.mailpit(timeout=...) must be a number of seconds, got {timeout!r}"
         )
@@ -613,7 +696,7 @@ def _seconds(name: str, value: str | None, default: float, *, allow_zero: bool) 
         seconds = float(value)
     except ValueError:
         raise pytest.UsageError(f"{name} must be a number of seconds, got {value!r}") from None
-    if seconds < 0 or (seconds == 0 and not allow_zero):
+    if not math.isfinite(seconds) or seconds < 0 or (seconds == 0 and not allow_zero):
         raise pytest.UsageError(f"{name} must be a positive number of seconds, got {value!r}")
     return seconds
 
@@ -638,4 +721,8 @@ def _verify(value: str | None, default: bool | str) -> bool | str:
         return True
     if value.strip().lower() in ("0", "false", "no", "off"):
         return False
+    if not os.path.exists(value):  # e.g. "flase", which would fail every request
+        raise pytest.UsageError(
+            f"mailpit_verify must be true, false or the path of a CA file, got {value!r}"
+        )
     return value  # a CA bundle

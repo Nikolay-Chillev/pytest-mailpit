@@ -314,3 +314,87 @@ def test_smtp_server_reads_well() -> None:
     assert server.host == "mail.test"
     _, port = server
     assert port == 2525
+
+
+@pytest.mark.parametrize(
+    ("error", "says"),
+    [
+        (
+            RuntimeError('404 Client Error: Not Found ("pull access denied for axllent/mailpitt")'),
+            "*pull access denied for axllent/mailpitt*",
+        ),
+        (
+            RuntimeError("Error while fetching server API version"),
+            "*Error while fetching server API version). Is Docker running?",
+        ),
+    ],
+)
+def test_a_failed_start_says_why_and_blames_docker_only_when_it_is_down(
+    pytester: pytest.Pytester, error: Exception, says: str
+) -> None:
+    FakeContainer.fail_with = error
+    pytester.makeini("[pytest]\nmailpit_container = true\n")
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
+
+    result = pytester.runpytest()
+
+    result.stdout.fnmatch_lines([says])
+    if "pull access" in str(error):
+        assert "Is Docker running?" not in result.stdout.str()
+
+
+def test_docker_refusing_the_connection_is_docker_being_down(pytester: pytest.Pytester) -> None:
+    try:
+        raise ConnectionRefusedError(111, "Connection refused")
+    except ConnectionRefusedError as cause:
+        error = RuntimeError("Could not talk to Docker")
+        error.__cause__ = cause
+    FakeContainer.fail_with = error
+    pytester.makeini("[pytest]\nmailpit_container = true\n")
+    pytester.makepyfile("def test_needs_mailpit(mailpit): pass")
+
+    pytester.runpytest().stdout.fnmatch_lines(["*(Could not talk to Docker). Is Docker running?"])
+
+
+class Configured:
+    """Stands in for MailpitContainer's _configure(): a certificate for STARTTLS."""
+
+    def __init__(self, image: str) -> None:
+        self.env: dict[str, str] = {}
+        self.volumes: dict[str, object] = {}
+        self.tls_cert_file, self.tls_key_file = "/tmp/cert", "/tmp/key"
+
+    def with_env(self, name: str, value: str) -> "Configured":
+        self.env[name] = value
+        return self
+
+    def _configure(self) -> None:
+        self.env |= {"MP_SMTP_TLS_CERT": "/cert.pem", "MP_SMTP_TLS_KEY": "/key.pem"}
+        self.env["MP_SMTP_AUTH_ACCEPT_ANY"] = "1"
+        self.volumes |= {self.tls_cert_file: {"bind": "/cert.pem"}, "/tmp/key": {}}
+
+
+def test_the_container_is_a_plain_mailpit_without_starttls() -> None:
+    from pytest_mailpit._container import plain
+
+    container = plain(Configured)("axllent/mailpit")
+    container._configure()
+
+    assert container.env == {"MP_SMTP_AUTH_ACCEPT_ANY": "1", "MP_SMTP_AUTH_ALLOW_INSECURE": "true"}
+    assert container.volumes == {}
+
+
+def test_a_container_without_a_certificate_is_left_as_it_is() -> None:
+    from pytest_mailpit._container import plain
+
+    class Bare(Configured):
+        def __init__(self, image: str) -> None:
+            self.env, self.volumes = {}, {}
+
+        def _configure(self) -> None:
+            pass
+
+    container = plain(Bare)("axllent/mailpit")
+    container._configure()
+
+    assert container.env == {"MP_SMTP_AUTH_ALLOW_INSECURE": "true"}

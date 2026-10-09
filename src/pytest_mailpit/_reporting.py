@@ -12,14 +12,15 @@ from dataclasses import dataclass
 import pytest
 
 from pytest_mailpit.errors import MailpitError
-from pytest_mailpit.inbox import Inbox
+from pytest_mailpit.inbox import Inbox, nodeid_hash
 from pytest_mailpit.models import Message, MessageSummary
 from pytest_mailpit.search import build_query
 
 # How many of an inbox's newest messages are attached; the section lists them all.
 MAX_ATTACHED = 10
 # What Mailpit allows in a tag: anything else becomes a space.
-_NOT_IN_TAGS = re.compile(r"[^a-zA-Z0-9\-_.@ ]+")
+# ("@" too, since Mailpit before 1.28.3 replaces it with a space.)
+_NOT_IN_TAGS = re.compile(r"[^a-zA-Z0-9\-_. ]+")
 MAX_TAG_LENGTH = 100
 
 
@@ -30,12 +31,15 @@ class _Email:
 
 
 def failure_tag(nodeid: str) -> str:
-    """The Mailpit tag of a failed test's messages: "failed" and the test's name.
+    """The Mailpit tag of a failed test's messages: "failed", the test's hash and its name.
 
-    "tests/test_shop.py::test_sign_up[en-US]" is tagged "failed test_sign_up en-US".
+    "tests/test_shop.py::test_sign_up[en-US]" is tagged "failed 3f9a2c test_sign_up en-US".
+    The hash, the one in the test's inbox addresses, keeps tests apart whose
+    names are the same in two files, or are written in another alphabet,
+    which Mailpit's tags cannot hold.
     """
     words = _NOT_IN_TAGS.sub(" ", nodeid.split("::", 1)[-1]).split()
-    return " ".join(["failed", *words])[:MAX_TAG_LENGTH].strip()
+    return " ".join(["failed", nodeid_hash(nodeid), *words])[:MAX_TAG_LENGTH].strip()
 
 
 def report_failure(
@@ -53,21 +57,25 @@ def report_failure(
         title = f"Mailpit messages to {inbox.address}"
         try:
             found = inbox.messages()
-            tagged = tag is not None and found and _add_tag(inbox, found, tag)
-            if not report_messages:
-                continue
-            table = inbox.describe(found)
-            emails = []
-            if allure or pytest_html:
-                for summary in found[-MAX_ATTACHED:]:
-                    message = inbox.client.get_message(summary.id)
-                    emails.append(_Email(message, inbox.client.get_raw(summary.id)))
         except MailpitError as error:
             if report_messages:
                 report.sections.append(
                     (title, f"Could not list the messages to {inbox.address}: {error}")
                 )
             continue
+        tagged = tag is not None and found and _add_tag(inbox, found, tag)
+        if not report_messages:
+            continue
+        table = inbox.describe(found)
+        emails = []
+        if allure or pytest_html:
+            for summary in found[-MAX_ATTACHED:]:
+                # One message gone (e.g. pruned meanwhile) leaves the others in the report.
+                try:
+                    message = inbox.client.get_message(summary.id)
+                    emails.append(_Email(message, inbox.client.get_raw(summary.id)))
+                except MailpitError as error:
+                    table += f"\nCould not attach {summary.subject!r}: {error}"
         if tagged:
             table += f"\nTagged {tag!r}: {inbox.client.search_url(build_query(tag=tag))}"
         report.sections.append((title, table))

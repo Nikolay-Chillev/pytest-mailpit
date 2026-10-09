@@ -33,7 +33,7 @@ def testcontainers_installed() -> bool:
 
 
 def start_container(image: str) -> Any:
-    container = container_class()(image)
+    container = plain(container_class())(image)
     for name, value in CONTAINER_ENV.items():
         container = container.with_env(name, value)
     try:
@@ -46,6 +46,35 @@ def start_container(image: str) -> Any:
     except BaseException:
         _stop(container)  # it may be running already
         raise
+
+
+def plain(base: Any) -> Any:
+    """MailpitContainer as a plain Mailpit, the one ``docker run axllent/mailpit`` gives.
+
+    Testcontainers gives Mailpit a self-signed certificate, so it offers
+    STARTTLS, and SMTP clients that upgrade whenever they can and check the
+    certificate (Go's net/smtp, nodemailer, aiosmtplib) refuse to send. Its
+    SMTP login, which accepts any user, stays, without TLS.
+    """
+
+    class PlainMailpitContainer(base):  # type: ignore[misc]
+        def _configure(self) -> None:
+            super()._configure()
+            without_tls(self)
+
+    return PlainMailpitContainer
+
+
+def without_tls(container: Any) -> None:
+    for name in ("MP_SMTP_TLS_CERT", "MP_SMTP_TLS_KEY"):
+        container.env.pop(name, None)
+    for path in (
+        getattr(container, "tls_cert_file", None),
+        getattr(container, "tls_key_file", None),
+    ):
+        if path is not None:
+            container.volumes.pop(str(path), None)
+    container.with_env("MP_SMTP_AUTH_ALLOW_INSECURE", "true")
 
 
 def _stop(container: Any) -> None:

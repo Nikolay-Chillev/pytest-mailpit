@@ -581,11 +581,14 @@ class _Wait:
     criteria: _Criteria
     count: int
     timeout: float
-    deadline: float
+    started: float
+    # The pauses slept so far. A frozen clock, e.g. freezegun's freeze_time,
+    # must not make a wait endless: time.sleep is real even then.
+    slept: float = 0.0
 
     @classmethod
     def start(cls, client: MailpitClient, criteria: _Criteria, count: int, timeout: float) -> Self:
-        return cls(client, criteria, count, timeout, time.monotonic() + timeout)
+        return cls(client, criteria, count, timeout, time.monotonic())
 
     def poll(self) -> list[Message] | _Failed | None:
         """The messages once the wait is over, a failure, or None to poll again."""
@@ -620,11 +623,13 @@ class _Wait:
         )
 
     def remaining(self) -> float:
-        return self.deadline - time.monotonic()
+        return self.timeout - max(time.monotonic() - self.started, self.slept)
 
     def pause(self) -> float:
-        """How long to wait before the next poll."""
-        return max(0.0, min(self.client.poll_interval, self.remaining()))
+        """How long to wait before the next poll; the caller sleeps that long."""
+        pause = max(0.0, min(self.client.poll_interval, self.remaining()))
+        self.slept += pause
+        return pause
 
 
 def _found(found: list[MessageSummary]) -> str:
@@ -648,13 +653,13 @@ def _require_query(query: str) -> None:
 
 def _require_positive(**values: float) -> None:
     for name, value in values.items():
-        if value <= 0:
+        if not value > 0:  # NaN too
             raise ValueError(f"{name} must be positive, got {value}")
 
 
 def _require_not_negative(**values: float) -> None:
     for name, value in values.items():
-        if value < 0:
+        if not value >= 0:  # NaN too
             raise ValueError(f"{name} must not be negative, got {value}")
 
 
