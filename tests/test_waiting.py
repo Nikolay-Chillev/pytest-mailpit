@@ -376,20 +376,43 @@ def test_invalid_client_options(options: dict[str, Any], message: str) -> None:
 # Server time
 
 
-def test_server_time_comes_from_the_date_header(
+def clock(mocked: responses.RequestsMock, *dates: str) -> None:
+    """Mailpit's liveness probe, whose Date header reads ``dates`` in turn, then the last."""
+    for date in dates:
+        mocked.get(f"{URL}livez", headers={"Date": date})
+
+
+def test_server_time_waits_for_the_next_second_of_mailpits_clock(
     mocked: responses.RequestsMock, client: MailpitClient
 ) -> None:
-    mocked.get(f"{URL}livez", headers={"Date": "Wed, 07 Oct 2026 11:22:33 GMT"})
+    # A message from 11:22:33.300 is older than a call at 11:22:33.700, which reads 11:22:33.
+    clock(
+        mocked,
+        "Wed, 07 Oct 2026 11:22:33 GMT",
+        "Wed, 07 Oct 2026 11:22:33 GMT",
+        "Wed, 07 Oct 2026 11:22:34 GMT",
+    )
 
-    assert client.server_time() == datetime(2026, 10, 7, 11, 22, 33, tzinfo=UTC)
+    assert client.server_time() == datetime(2026, 10, 7, 11, 22, 34, tzinfo=UTC)
+    assert len(mocked.calls) == 3
 
 
 def test_server_time_without_a_zone_is_utc(
     mocked: responses.RequestsMock, client: MailpitClient
 ) -> None:
-    mocked.get(f"{URL}livez", headers={"Date": "Wed, 07 Oct 2026 11:22:33 -0000"})
+    clock(mocked, "Wed, 07 Oct 2026 11:22:33 -0000", "Wed, 07 Oct 2026 11:22:34 -0000")
 
-    assert client.server_time() == datetime(2026, 10, 7, 11, 22, 33, tzinfo=UTC)
+    assert client.server_time() == datetime(2026, 10, 7, 11, 22, 34, tzinfo=UTC)
+
+
+def test_a_clock_that_stands_still_gives_the_next_second(
+    mocked: responses.RequestsMock, client: MailpitClient
+) -> None:
+    clock(mocked, "Wed, 07 Oct 2026 11:22:33 GMT")
+    started = time.monotonic()
+
+    assert client.server_time() == datetime(2026, 10, 7, 11, 22, 34, tzinfo=UTC)
+    assert time.monotonic() - started < 3
 
 
 @pytest.mark.parametrize("headers", [{}, {"Date": "yesterday"}])

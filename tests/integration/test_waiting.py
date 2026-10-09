@@ -2,7 +2,6 @@
 
 import re
 import threading
-import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -50,9 +49,8 @@ def test_since_the_server_time(
 ) -> None:
     send_email(recipient, subject="Before")
     client.wait_for_message(recipient=recipient)
-    # The server time has a one-second resolution, so step past the first message.
-    since = client.server_time() + timedelta(seconds=1)
-    time.sleep(1.1)
+    # Most likely in the same second as "Before": Mailpit's clock reads to the second.
+    since = client.server_time()
     send_email(recipient, subject="After")
 
     assert client.wait_for_message(recipient=recipient, since=since).subject == "After"

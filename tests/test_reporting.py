@@ -29,7 +29,7 @@ def clean_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def mailpit_with(
-    messages_per_inbox: int = 1, html_part: str | None = None
+    messages_per_inbox: int = 1, html_part: str | None = None, subject: str | None = None
 ) -> responses.RequestsMock:
     """A mocked Mailpit where every inbox has ``messages_per_inbox`` messages."""
 
@@ -48,6 +48,8 @@ def mailpit_with(
         data = samples.MESSAGE | {"ID": (request.url or "").rsplit("/", 1)[1]}
         if html_part is not None:
             data["HTML"] = html_part
+        if subject is not None:
+            data["Subject"] = subject
         return 200, {"Content-Type": "application/json"}, json.dumps(data)
 
     mock = responses.RequestsMock(assert_all_requests_are_fired=False)
@@ -153,6 +155,18 @@ def test_pytest_html_gets_a_link_to_mailpit_and_the_email(pytester: pytest.Pytes
     assert (
         '<iframe sandbox="" srcdoc="&lt;p&gt;Thank you for your order.&lt;/p&gt;' in card["content"]
     )
+
+
+def test_a_subject_with_markup_stays_text_in_pytest_html(pytester: pytest.Pytester) -> None:
+    # A sign-up test with an XSS payload as the user's name, for example.
+    pytester.makepyfile(FAILING_TEST)
+
+    with mailpit_with(subject="Welcome, <img src=x onerror=alert(1)>"):
+        pytester.runpytest("--html=report.html", "--self-contained-html").assert_outcomes(failed=1)
+
+    extras = pytest_html_extras(pytester.path / "report.html")
+    [link] = [extra for extra in extras if extra["format_type"] == "url"]
+    assert link["name"] == "Mailpit: Welcome, &lt;img src=x onerror=alert(1)&gt;"
 
 
 # What is not done

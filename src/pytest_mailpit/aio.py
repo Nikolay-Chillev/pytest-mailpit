@@ -12,6 +12,7 @@ from datetime import datetime
 from types import TracebackType
 from typing import Self
 
+from pytest_mailpit._args import strings
 from pytest_mailpit.client import DEFAULT_URL, MailpitClient, _Failed, _Wait
 from pytest_mailpit.errors import MailpitAssertionError
 from pytest_mailpit.inbox import Inbox
@@ -178,7 +179,7 @@ class AsyncMailpitClient:
     # Changing
 
     async def delete_messages(self, message_ids: Iterable[str]) -> None:
-        await asyncio.to_thread(self.sync.delete_messages, list(message_ids))
+        await asyncio.to_thread(self.sync.delete_messages, strings(message_ids, "message IDs"))
 
     async def delete_search(self, query: str) -> None:
         await asyncio.to_thread(self.sync.delete_search, query)
@@ -187,10 +188,12 @@ class AsyncMailpitClient:
         await asyncio.to_thread(self.sync.delete_all)
 
     async def mark_read(self, message_ids: Iterable[str], *, read: bool = True) -> None:
-        await asyncio.to_thread(self.sync.mark_read, list(message_ids), read=read)
+        await asyncio.to_thread(self.sync.mark_read, strings(message_ids, "message IDs"), read=read)
 
     async def set_tags(self, message_ids: Iterable[str], tags: Iterable[str]) -> None:
-        await asyncio.to_thread(self.sync.set_tags, list(message_ids), list(tags))
+        await asyncio.to_thread(
+            self.sync.set_tags, strings(message_ids, "message IDs"), strings(tags, "tags")
+        )
 
     # Chaos
 

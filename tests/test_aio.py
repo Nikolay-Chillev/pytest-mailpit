@@ -105,6 +105,24 @@ def test_every_request_runs_in_a_worker_thread(
     assert recorder.calls == [(*called, True)]
 
 
+@pytest.mark.parametrize(
+    ("method", "args"),
+    [
+        ("delete_messages", ("m1",)),
+        ("mark_read", ("m1",)),
+        ("set_tags", ("m1", ["x"])),
+        ("set_tags", (["m1"], "urgent")),
+    ],
+)
+def test_a_single_string_is_refused(method: str, args: tuple[Any, ...]) -> None:
+    recorder = Recorder()
+
+    with pytest.raises(TypeError, match="got a single string"):
+        asyncio.run(getattr(AsyncMailpitClient(cast(MailpitClient, recorder)), method)(*args))
+
+    assert recorder.calls == []
+
+
 def test_the_client_from_a_url() -> None:
     client = AsyncMailpitClient("http://user:secret@mailpit.test:8025/")
 

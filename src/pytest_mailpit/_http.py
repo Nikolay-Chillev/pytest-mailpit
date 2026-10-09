@@ -1,10 +1,12 @@
 """HTTP access to Mailpit: one requests session bound to the server's URL."""
 
 import json
+import warnings
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
+from urllib3.exceptions import InsecureRequestWarning
 
 from pytest_mailpit.errors import MailpitAPIError, MailpitConnectionError
 
@@ -38,8 +40,10 @@ class Transport:
         self.display_url = _without_credentials(self.base_url)
         self._userinfo = parts.netloc.rpartition("@")[0]
         self.timeout = timeout
+        # Passed with every request: requests would put REQUESTS_CA_BUNDLE or
+        # CURL_CA_BUNDLE from the environment in place of a session-wide setting.
+        self.verify = verify
         self.session = requests.Session()
-        self.session.verify = verify
         if username is not None:
             self.session.auth = (username, password or "")
 
@@ -54,16 +58,28 @@ class Transport:
         *,
         params: dict[str, Any] | None = None,
         json_body: Any = None,
+        timeout: float | None = None,
     ) -> requests.Response:
+        """Send a request; ``timeout`` replaces the transport's for slow endpoints."""
+        seconds = self.timeout if timeout is None else timeout
         try:
-            response = self.session.request(
-                method,
-                self.url(path),
-                params=params,
-                json=json_body,
-                timeout=self.timeout,
-                allow_redirects=False,
-            )
+            with warnings.catch_warnings():
+                if self.verify is False:  # asked for: no warning on every request
+                    warnings.simplefilter("ignore", InsecureRequestWarning)
+                response = self.session.request(
+                    method,
+                    self.url(path),
+                    params=params,
+                    json=json_body,
+                    timeout=seconds,
+                    verify=self.verify,
+                    allow_redirects=False,
+                )
+        except requests.ReadTimeout as error:
+            # Mailpit took the request, so it can be reached; it is only slow.
+            raise MailpitConnectionError(
+                f"Mailpit at {self.display_url} did not answer {method} {path} within {seconds:g} s"
+            ) from error
         except requests.RequestException as error:
             # The error text can contain the requested URL, credentials included.
             reason = str(error).replace(f"{self._userinfo}@", "") if self._userinfo else error
@@ -77,8 +93,10 @@ class Transport:
             )
         return response
 
-    def get_json(self, path: str, *, params: dict[str, Any] | None = None) -> Any:
-        response = self.request("GET", path, params=params)
+    def get_json(
+        self, path: str, *, params: dict[str, Any] | None = None, timeout: float | None = None
+    ) -> Any:
+        response = self.request("GET", path, params=params, timeout=timeout)
         try:
             return response.json()
         except ValueError:

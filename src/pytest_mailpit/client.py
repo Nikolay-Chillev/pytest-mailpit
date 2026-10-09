@@ -3,12 +3,13 @@
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from types import TracebackType
 from typing import NamedTuple, Self
 from urllib.parse import quote, urlencode, urljoin
 
+from pytest_mailpit._args import strings
 from pytest_mailpit._django import outbox_hint
 from pytest_mailpit._http import Transport
 from pytest_mailpit._report import message_table
@@ -26,6 +27,11 @@ from pytest_mailpit.models import (
 from pytest_mailpit.search import build_query
 
 DEFAULT_URL = "http://localhost:8025/"
+# The link check answers after a HEAD request to every link, of up to 10 s
+# each, a few at a time; the HTML check may load remote stylesheets.
+_CHECK_TIMEOUT = 120.0
+# How often server_time() reads Mailpit's clock while it waits for the next second.
+_CLOCK_POLL = 0.05
 # How many of the newest messages a failure lists.
 _FAILURE_TABLE_SIZE = 10
 
@@ -102,17 +108,33 @@ class MailpitClient:
         return True
 
     def server_time(self) -> datetime:
-        """The current time on the Mailpit server, to the second, in UTC.
+        """The time on the Mailpit server, in UTC, for ``since`` of the ``wait_for_*`` methods.
 
-        Use it as ``since`` of the ``wait_for_*`` methods when the server's clock
-        may differ from the clock of the machine running the tests.
+        Mailpit's clock can only be read to the second (the HTTP Date header),
+        and a message that arrived earlier in the same second would match a
+        time cut to that second. So this waits until Mailpit's clock reaches the
+        next second, up to a second, and returns it: every message Mailpit
+        received before the call is older. Without a Date header, it is the
+        local time.
         """
+        first = self._clock()
+        if first is None:
+            return datetime.now(UTC)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            time.sleep(_CLOCK_POLL)
+            now = self._clock()
+            if now is not None and now > first:
+                return now
+        return first + timedelta(seconds=1)
+
+    def _clock(self) -> datetime | None:
+        """Mailpit's clock, to the second, from the Date header of its liveness probe."""
         response = self._http.request("GET", "livez")
         try:
             server_time = parsedate_to_datetime(response.headers["Date"])
         except (KeyError, TypeError, ValueError):
-            # No usable Date header: fall back to the local clock.
-            return datetime.now(UTC)
+            return None
         if server_time.tzinfo is None:  # "-0000" means UTC without saying so
             server_time = server_time.replace(tzinfo=UTC)
         return server_time.astimezone(UTC)
@@ -176,12 +198,21 @@ class MailpitClient:
         """Mailpit's link check: a HEAD request to every link in the message."""
         params = {"follow": "true"} if follow_redirects else None
         return LinkCheck.from_api(
-            self._http.get_json(f"api/v1/message/{message_id}/link-check", params=params)
+            self._http.get_json(
+                f"api/v1/message/{message_id}/link-check",
+                params=params,
+                timeout=max(self._http.timeout, _CHECK_TIMEOUT),
+            )
         )
 
     def check_html(self, message_id: str) -> HTMLCheck:
         """Mailpit's HTML check: how well email clients support the message's HTML and CSS."""
-        return HTMLCheck.from_api(self._http.get_json(f"api/v1/message/{message_id}/html-check"))
+        return HTMLCheck.from_api(
+            self._http.get_json(
+                f"api/v1/message/{message_id}/html-check",
+                timeout=max(self._http.timeout, _CHECK_TIMEOUT),
+            )
+        )
 
     def get_attachment(self, attachment: Attachment) -> bytes:
         """The content of an attachment or inline part of a message this client fetched."""
@@ -392,7 +423,8 @@ class MailpitClient:
         """
         ids = _unique(message_ids)
         if ids:
-            self._http.request("PUT", "api/v1/tags", json_body={"IDs": ids, "Tags": list(tags)})
+            json_body = {"IDs": ids, "Tags": strings(tags, "tags")}
+            self._http.request("PUT", "api/v1/tags", json_body=json_body)
 
     # Chaos: SMTP errors on purpose. Mailpit must run with Chaos enabled
     # (MP_ENABLE_CHAOS=true or --enable-chaos), or it answers with HTTP 400.
@@ -557,6 +589,4 @@ def _require_not_negative(**values: float) -> None:
 
 def _unique(message_ids: Iterable[str]) -> list[str]:
     # Duplicate IDs in one delete locked Mailpit's database before v1.30.7.
-    if isinstance(message_ids, str):
-        raise TypeError("Expected a list of message IDs, got a single string")
-    return list(dict.fromkeys(message_ids))
+    return list(dict.fromkeys(strings(message_ids, "message IDs")))
