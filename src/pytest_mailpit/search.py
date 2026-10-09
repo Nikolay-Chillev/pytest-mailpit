@@ -5,9 +5,11 @@ double quote. A value can therefore contain spaces but never a double quote,
 and there is no way to escape one. A term that starts with ``-`` or ``!`` is
 negated, quoted or not.
 
-Terms match as substrings, case-insensitively: ``to:a@example.test`` also
-finds ``ba@example.test``. Check the exact address on the results when that
-matters.
+Terms match as substrings: ``to:a@example.test`` also finds
+``ba@example.test``, so check the exact address on the results when that
+matters. ``tag:`` is the exception: it matches a whole tag. Case is ignored in
+ASCII letters only, not in Cyrillic, for example. Up to Mailpit 1.31.4, ``_``
+and ``%`` in a term are wildcards: ``subject:Order_1`` also finds "Order-1".
 """
 
 # Mailpit's filters, the same in every supported version: a term that starts

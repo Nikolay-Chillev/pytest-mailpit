@@ -1,4 +1,5 @@
-# Mailpit next to the application; the tests run on the host.
+# Mailpit next to the application; the tests run on the host
+# (compose.tests.yaml runs them in a container).
 #
 #   docker compose up -d --build --wait
 #   pytest tests

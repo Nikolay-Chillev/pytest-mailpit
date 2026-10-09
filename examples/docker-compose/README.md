@@ -18,19 +18,17 @@ Inside the compose network, the application reaches Mailpit by its service name,
 | The application (in a container) | SMTP | `mailpit:1025` |
 | The tests (on the host) | API and web UI | `http://localhost:8025`, the plugin's default |
 
-To run the tests in a container of the same compose project instead, point both at the service names:
+To run the tests in a container of the same compose project instead, [`compose.tests.yaml`](compose.tests.yaml) adds a `tests` service. It reaches Mailpit and the application by their service names, and has the application build the links in its email with the address the tests use, `http://app:8000`:
 
-```yaml
-  tests:
-    build: .
-    command: pytest
-    environment:
-      MAILPIT_URL: http://mailpit:8025/
-      APP_URL: http://app:8000
-    depends_on:
-      app:
-        condition: service_healthy
+```bash
+docker compose -f compose.yaml -f compose.tests.yaml run --rm --build tests
+docker compose -f compose.yaml -f compose.tests.yaml down
 ```
+
+| Who | What | Address |
+|---|---|---|
+| The tests (in a container) | API and web UI | `http://mailpit:8025/`, from `MAILPIT_URL` |
+| The tests (in a container) | The application | `http://app:8000`, from `APP_URL` |
 
 ## Waiting for Mailpit
 

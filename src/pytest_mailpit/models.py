@@ -7,6 +7,7 @@ models parse responses from every supported server version.
 
 import fnmatch
 import inspect
+import math
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -248,8 +249,11 @@ class HTMLCheck:
     """``GET /api/v1/message/{ID}/html-check``: how well email clients support the
     message's HTML and CSS, from caniemail.com data."""
 
-    # Percentages of the message's HTML and CSS that email clients support fully,
-    # partly or not at all; they add up to 100.
+    # Mailpit's scores, in percent: ``partial`` and ``unsupported`` are those of
+    # the worst partly supported feature and the worst unsupported one, each
+    # weighted by how often the message uses it, and ``supported`` is 100 minus
+    # both. It can drop below 0 when a feature is used more often than there
+    # are HTML elements, as with many CSS rules.
     supported: float
     partial: float
     unsupported: float
@@ -496,7 +500,10 @@ class Message:
         A link is broken when it answers with an error status (400 and above)
         or not at all. Links containing any of the ``ignore`` strings are not
         held against the message, e.g. social networks that refuse HEAD requests.
-        With ``follow_redirects`` the status of the final page counts.
+        With ``follow_redirects`` the status of the final page counts. Mailpit
+        follows up to two redirects, so a longer chain counts as broken, and
+        since Mailpit 1.30.3 it reuses a link's result for a minute, whether or
+        not it followed redirects for it.
         """
         __tracebackhide__ = True
         ignored = strings(ignore, "parts of links to ignore, e.g. ignore=['linkedin.com']")
@@ -524,21 +531,29 @@ class Message:
         return self._require_client().check_html(self.id)
 
     def assert_html_support(self, at_least: float) -> HTMLCheck:
-        """Fail the test unless email clients support at least ``at_least`` percent
-        of the message's HTML and CSS, and return the check.
+        """Fail the test unless Mailpit's HTML support score of the message is at
+        least ``at_least`` percent, from 0 to 100, and return the check.
 
-        The figure is Mailpit's, from caniemail.com data; its web UI shows the
-        same check. A failure lists the worst problems.
+        The score is the one Mailpit's web UI shows, from caniemail.com data:
+        100 minus the worst partly supported feature and the worst unsupported
+        one, each weighted by how often the message uses it. A failure lists
+        the worst problems.
         """
         __tracebackhide__ = True
+        if not 0 <= at_least <= 100 or 0 < at_least < 1:
+            raise ValueError(
+                f"at_least is a percentage from 0 to 100, such as at_least=90, got {at_least!r}"
+            )
         if not self.html.strip():
             raise MailpitAssertionError(f"The {self._describe()} has no HTML part to check.")
         result = self.check_html()
         if result.supported >= at_least:
             return result
+        # Rounded down, so that 79.96 does not show as the 80.0 it falls short of.
+        score = math.floor(result.supported * 10) / 10
         lines = [
-            f"Email clients support {result.supported:.1f}% of the HTML and CSS in "
-            f"{self._describe()}, expected at least {at_least:g}%."
+            f"Mailpit's HTML check gives {self._describe()} a support score of "
+            f"{score:.1f}%, expected at least {at_least:g}%."
         ]
         if result.warnings:
             lines.append("Worst problems (caniemail.com data):")
@@ -672,6 +687,7 @@ class MessageList:
     messages: tuple[MessageSummary, ...]
     # Messages matching the search (all messages for a plain list).
     messages_count: int
+    # Of those, the unread ones (Mailpit 1.24.1+, else 0).
     messages_unread: int
     # Messages in the whole mailbox.
     total: int

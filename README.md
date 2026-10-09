@@ -88,7 +88,7 @@ def test_sign_up_sends_a_confirmation_code(app_client, mailpit_inbox):
 | `messages()` | The messages sent to the address so far, oldest first. |
 | `clear()` | Deletes the messages sent to the address. |
 
-`subject` matches any part of the subject, `sender` the whole From address, and `query` adds a [Mailpit search](https://mailpit.axllent.org/docs/usage/search-filters/). The address can be in To, Cc or Bcc.
+`subject` matches any part of the subject, `sender` the whole From address, and `query` adds a [Mailpit search](https://mailpit.axllent.org/docs/usage/search-filters/). The address can be in To, Cc or Bcc. Mailpit ignores case only in ASCII letters, so write a subject in Cyrillic with its exact case.
 
 ### Messages
 
@@ -149,7 +149,7 @@ Mailpit can check a message the way a careful reviewer would, and pytest-mailpit
 ```python
 message.assert_links_work()  # no link answers with an error status, or not at all
 message.assert_links_work(ignore=["linkedin.com"])  # sites that refuse automated requests
-message.assert_html_support(at_least=90)  # % of the HTML and CSS that email clients support
+message.assert_html_support(at_least=90)  # Mailpit's HTML support score, in percent
 ```
 
 A failure lists the broken links with their status, or the HTML and CSS features that hold the message back, with their pages on [caniemail.com](https://www.caniemail.com/):
@@ -161,6 +161,8 @@ A failure lists the broken links with their status, or the HTML and CSS features
 ```
 
 Mailpit sends a HEAD request to every link, so the links must be reachable from where Mailpit runs. Since Mailpit 1.29.2 it refuses to check private and internal addresses, such as `localhost` or a Docker service; to check links to the application under test, start Mailpit with `MP_ALLOW_INTERNAL_HTTP_REQUESTS=true`. `message.check_links()` and `message.check_html()` return the full results without asserting.
+
+With `follow_redirects=True`, `assert_links_work()` judges the page a link ends at. Mailpit follows up to two redirects, so a longer chain counts as broken, and since 1.30.3 it reuses a link's result for a minute, whether or not it followed redirects for it. The HTML score is the one Mailpit's web UI shows: 100 minus the worst partly supported feature and the worst unsupported one, each weighted by how often the message uses it.
 
 #### In the browser
 
@@ -206,7 +208,7 @@ def test_invitation(app_client, mailpit_inbox, mailpit_inbox_factory):
 
 ### Async tests
 
-`mailpit_async_inbox` is `mailpit_inbox` with methods to await, and `mailpit_async` is the client's. Use them when the application under test sends email from the test's event loop: a background task, or a server running in the same loop. The sync methods would block the loop while they wait, so the email would never be sent; the async ones yield to it between polls.
+`mailpit_async_inbox` is `mailpit_inbox` with methods to await, and `mailpit_async` is the client's. Use them when the application under test sends email from the test's event loop: a task started with `asyncio.create_task()`, or a server such as uvicorn running in the same loop. The sync methods would block the loop while they wait, so the email would never be sent; the async ones yield to it between polls. An ASGI test client, such as httpx's `ASGITransport` or Starlette's `TestClient`, runs FastAPI's background tasks before the response returns, so there the sync inbox works too.
 
 ```python
 import pytest
@@ -272,11 +274,34 @@ with MailpitClient("http://localhost:8025/") as mailpit:
     for summary in mailpit.search_all(build_query(to="orders@example.com", subject="Invoice")):
         print(summary.created, summary.subject)
 
-    message = mailpit.wait_for_message(recipient="orders@example.com", subject="Invoice")
+    since = mailpit.server_time()
+    place_an_order()  # the application emails an invoice to orders@example.com
+    message = mailpit.wait_for_message(
+        recipient="orders@example.com", subject="Invoice", since=since
+    )
     source = mailpit.get_raw(message.id)  # the .eml
 ```
 
+The `wait_for_*` methods and `assert_no_message()` take a `query` and the criteria `recipient`, `sender`, `subject` and `tag`, which matches a whole tag. On an address that other runs use too, `since=mailpit.server_time()`, taken before the email is sent, leaves out the messages that were there before.
+
 It covers searching, reading whole messages, headers, the raw source and parts, deleting by IDs or by search, read status, tags (`set_tags()`), waiting and Chaos (`chaos()`, `set_chaos()`). `search_url()` and `view_url()` link to Mailpit's web UI. An empty list of IDs never reaches Mailpit, which would otherwise delete or change every message, and neither does a `delete_search()` query whose every term Mailpit would drop, such as `to:` with an empty address.
+
+Its errors are exceptions from `pytest_mailpit`, all `MailpitError`s: `MailpitAssertionError`, a test failure (an `AssertionError`), when a message does not arrive or a link or code is not found; `MailpitConnectionError` when Mailpit cannot be reached; and `MailpitAPIError`, with `status_code` and `detail`, when it answers with an error.
+
+### Fixtures
+
+| Fixture | Scope | What it is |
+|---|---|---|
+| `mailpit_inbox` | test | An address only this test uses, and its messages |
+| `mailpit_inbox_factory` | test | Creates another inbox each time it is called |
+| `mailpit_async_inbox` | test | `mailpit_inbox` with methods to await |
+| `mailpit` | session | The `MailpitClient` for the configured server |
+| `mailpit_async` | session | The same client with methods to await |
+| `mailpit_smtp` | session | The host and port of Mailpit's SMTP server, where the application sends its email |
+| `mailpit_config` | session | The settings the plugin runs with, such as `url` and `smtp`; override it to point the plugin at [your own container](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/testcontainers#your-own-container) |
+| `mailpit_container` | session | Testcontainers' `MailpitContainer`, with `mailpit_container = true` |
+| `mailpit_django` | test | Sends Django's email to Mailpit for one test |
+| `mailpit_chaos` | test | Makes Mailpit's SMTP server reject messages for one test |
 
 ### Settings
 
@@ -285,7 +310,7 @@ Command line options win over environment variables, which win over ini settings
 | Setting | Option | Environment | ini (`pytest.ini`, `[tool.pytest.ini_options]`) | Default |
 |---|---|---|---|---|
 | Mailpit's URL, with its web root if it has one | `--mailpit-url` | `MAILPIT_URL` | `mailpit_url` | `http://localhost:8025/` |
-| Username and password (`--ui-auth`) | | `MAILPIT_USERNAME`, `MAILPIT_PASSWORD` | | none |
+| Username and password (Mailpit's `--ui-auth-file` or `MP_UI_AUTH`) | | `MAILPIT_USERNAME`, `MAILPIT_PASSWORD` | | none |
 | TLS verification: `true`, `false` or a CA file | | `MAILPIT_VERIFY` | `mailpit_verify` | `true` |
 | How long to wait for a message, in seconds | `--mailpit-timeout` | `MAILPIT_WAIT_TIMEOUT` | `mailpit_wait_timeout` | `10` |
 | How often to check, in seconds | | | `mailpit_poll_interval` | `0.5` |
@@ -313,6 +338,8 @@ A single slow test can wait longer:
 def test_monthly_report(mailpit_inbox): ...
 ```
 
+`pytest -p no:mailpit` turns the plugin off for a run.
+
 ### Parallel tests
 
 With pytest-xdist, `pytest -n auto` needs nothing extra. Every address includes the worker (`pytest-gw3-...`), waiting matches it exactly, and cleanup deletes only that test's messages, so workers sharing one Mailpit never interfere. The exception is [`mailpit_chaos`](#when-sending-fails), whose errors reach every worker.
@@ -332,12 +359,16 @@ Tagged 'failed 3f9a2c test_sign_up': http://localhost:8025/search?q=tag%3A%22fai
 
 The kept messages are tagged with the test's hash, the one in its inbox addresses, and its name, such as `failed 3f9a2c test_sign_up`, and the link opens them in Mailpit's web UI. The hash keeps apart tests with the same name in two files, or with names in another alphabet; tags the application gave them stay. Set `mailpit_tag_failures = false` to leave the tags alone.
 
+The listing is a report section, like pytest's captured output: pytest prints it with the default `--show-capture=all`, but not with `--show-capture=no`, `stdout`, `stderr` or `log`, and JUnit XML leaves it out. The tags are set either way.
+
 With [Allure](https://allurereport.org/docs/pytest/) (`--alluredir`) or [pytest-html](https://pytest-html.readthedocs.io/) (`--html`), the emails themselves are attached too, so a CI report keeps them after Mailpit is gone:
 
 - **Allure**: the table above, each email as HTML (or text when it has no HTML part), and its source as an `.eml` file.
 - **pytest-html**: a link to each email in Mailpit's web UI, and the email itself, shown in a sandboxed frame that keeps its styles and scripts out of the report.
 
-The ten newest emails of each inbox are attached, and only when the test fails. Emails can hold tokens or personal data; set `mailpit_report_messages = false` to keep them out of reports and CI artifacts.
+The ten newest emails of each inbox are attached, and only when the test fails. With `mailpit_container = true` the container goes away at the end of the session, and the kept messages with it, so the Mailpit links work only while the tests run; the attachments stay.
+
+Emails can hold tokens or personal data: `mailpit_report_messages = false` leaves out the listing and the attachments. Failure messages still name subjects and addresses, and those of `link()` and `code()` the links and codes the message has, so they end up in reports too.
 
 Mailpit keeps only the newest 500 messages by default (`MP_MAX_MESSAGES`) and deletes the others every minute, so kept messages do not stay forever. When tests failed and Mailpit holds 450 messages or more at the end of the run, a warning says so; if your Mailpit has a higher limit, silence it with `filterwarnings = ignore:Mailpit at .* holds:pytest_mailpit.MailpitWarning`.
 
@@ -378,7 +409,7 @@ jobs:
 
 ### Recipes
 
-- [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host, and how the two find each other.
+- [docker compose](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/docker-compose): Mailpit next to the application, the tests on the host or in a container, and how they find each other.
 - [Django](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/django): a sign-up email with a confirmation link, read from Mailpit with `mailpit_django` and followed with Django's test client.
 - [Flask](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/flask): a password reset link sent with Flask-Mail, which sends nothing in `TESTING` mode unless told to.
 - [FastAPI](https://github.com/Nikolay-Chillev/pytest-mailpit/tree/main/examples/fastapi): a login code sent in a background task, with the SMTP settings as a dependency the test overrides.
@@ -405,16 +436,20 @@ Python 3.11–3.14 and pytest 8.4 or newer, on Linux, macOS and Windows. Mailpit
 Issues and pull requests are welcome. To work on the code:
 
 ```bash
+python -m pip install --upgrade pip  # --group needs pip 25.1 or newer
 pip install -e . --group dev
 pytest
 ```
 
-The integration tests need a running Mailpit that may check links to internal addresses:
+The integration tests need a running Mailpit that may check links to internal addresses and has Chaos enabled, and Chromium for the browser tests:
 
 ```bash
-docker run -d -p 8025:8025 -p 1025:1025 -e MP_ALLOW_INTERNAL_HTTP_REQUESTS=true axllent/mailpit
+docker run -d -p 8025:8025 -p 1025:1025 -e MP_ALLOW_INTERNAL_HTTP_REQUESTS=true -e MP_ENABLE_CHAOS=true -e MP_SMTP_DISABLE_RDNS=true axllent/mailpit
+python -m playwright install chromium
 pytest -m integration
 ```
+
+The container tests start a Mailpit of their own, so Docker must be running too.
 
 ## License
 

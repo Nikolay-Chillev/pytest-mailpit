@@ -1,8 +1,10 @@
 """What a failed test's report shows about the messages sent to its inboxes.
 
-The terminal report always gets a section with the inbox's messages. When
-Allure (``--alluredir``) or pytest-html (``--html``) is in use, the messages
-themselves are attached too, so a CI report keeps them after Mailpit is gone.
+The report gets a section with the inbox's messages, which pytest prints in
+the terminal only with the default ``--show-capture=all``, and which JUnit XML
+leaves out. When Allure (``--alluredir``) or pytest-html (``--html``) is in
+use, the messages themselves are attached too, so a CI report keeps them after
+Mailpit is gone.
 """
 
 import html

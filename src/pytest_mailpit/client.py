@@ -43,7 +43,7 @@ class MailpitClient:
 
     ``url`` is the address of Mailpit's web UI, including the web root if
     Mailpit runs with ``--webroot``. ``username`` and ``password`` are for
-    Mailpit's UI authentication (``--ui-auth``). ``verify`` is passed to
+    Mailpit's UI authentication (``--ui-auth-file`` or ``MP_UI_AUTH``). ``verify`` is passed to
     requests: ``False`` skips TLS verification, a path selects a CA bundle.
     ``timeout`` limits each HTTP request; ``wait_timeout`` and
     ``poll_interval`` are the defaults of the ``wait_for_*`` methods.
@@ -256,10 +256,13 @@ class MailpitClient:
     #
     # Every method takes a Mailpit search ``query``, criteria, or both:
     # ``recipient`` and ``sender`` match a whole address, case-insensitively
-    # (``recipient`` in To, Cc or Bcc); ``subject`` and ``tag`` match any part,
-    # as Mailpit's search does; ``since`` (timezone-aware) skips messages that
-    # arrived earlier. Connection and API errors are raised as they happen,
-    # never mistaken for a missing message.
+    # (``recipient`` in To, Cc or Bcc). ``subject`` matches any part of the
+    # subject and ``tag`` a whole tag, as Mailpit stores it (see ``set_tags``),
+    # the way Mailpit's search does: it ignores case only in ASCII letters, and
+    # up to Mailpit 1.31.4 takes ``_`` and ``%`` in a subject as wildcards.
+    # ``since`` (timezone-aware) skips messages that arrived earlier.
+    # Connection and API errors are raised as they happen, never mistaken for
+    # a missing message.
 
     def wait_for_message(
         self,
@@ -446,6 +449,10 @@ class MailpitClient:
 
     def delete_search(self, query: str) -> None:
         """Delete the messages matching ``query``.
+
+        Mailpit's search matches substrings, and up to Mailpit 1.31.4 takes
+        ``_`` and ``%`` as wildcards, so a query can match more messages than
+        its text suggests: ``search_all()`` shows what it finds.
 
         Raises ValueError for a query whose terms Mailpit would all drop, such
         as ``to:`` with an empty address: it would delete every message.

@@ -248,8 +248,8 @@ def test_too_little_html_support_lists_the_worst_problems(
 
     lines = str(raised.value).splitlines()
     assert lines[0] == (
-        "Email clients support 72.5% of the HTML and CSS in message 'Поръчка №1001' to "
-        "ivan@example.test, expected at least 80%."
+        "Mailpit's HTML check gives message 'Поръчка №1001' to ivan@example.test a support "
+        "score of 72.4%, expected at least 80%."
     )
     assert lines[1] == "Worst problems (caniemail.com data):"
     assert lines[2] == (
@@ -257,6 +257,21 @@ def test_too_little_html_support_lists_the_worst_problems(
         "https://www.caniemail.com/features/feature 1/"
     )
     assert len(lines) == 2 + 5
+
+
+def test_a_score_just_below_the_threshold_does_not_show_as_reaching_it(
+    mocked: responses.RequestsMock, message: Message
+) -> None:
+    mocked.get(HTML_CHECK, json=html_check(79.96))
+
+    with pytest.raises(MailpitAssertionError, match=r"score of 79\.9%, expected at least 80%"):
+        message.assert_html_support(at_least=80)
+
+
+@pytest.mark.parametrize("at_least", [0.9, -1, 101, float("nan")])
+def test_html_support_needs_a_percentage(message: Message, at_least: float) -> None:
+    with pytest.raises(ValueError, match=r"percentage from 0 to 100, such as at_least=90"):
+        message.assert_html_support(at_least=at_least)
 
 
 def test_html_support_of_a_message_without_html(mocked: responses.RequestsMock) -> None:
