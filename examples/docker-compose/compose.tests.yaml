@@ -1,0 +1,27 @@
+# The tests in a container of the same compose project, instead of on the host:
+#
+#   docker compose -f compose.yaml -f compose.tests.yaml run --rm --build tests
+#   docker compose -f compose.yaml -f compose.tests.yaml down
+
+services:
+  app:
+    environment:
+      # The links in the email must work from where the tests run.
+      PUBLIC_URL: http://app:8000
+
+  tests:
+    image: python:3.13-slim
+    working_dir: /example
+    volumes:
+      - ./tests:/example/tests:ro
+    environment:
+      # Inside the compose network, Mailpit and the application are reached by their service names.
+      MAILPIT_URL: http://mailpit:8025/
+      APP_URL: http://app:8000
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: >-
+      sh -c "pip install --quiet --disable-pip-version-check --root-user-action=ignore
+      pytest-mailpit requests && pytest -p no:cacheprovider tests"
+    depends_on:
+      app:
+        condition: service_healthy

@@ -124,6 +124,13 @@ jobs:
         if: ${{ always() }}
         working-directory: examples/docker-compose
         run: docker compose down
+      - name: Test the docker compose example from a container
+        working-directory: examples/docker-compose
+        run: docker compose -f compose.yaml -f compose.tests.yaml run --rm --build tests
+      - name: Stop the docker compose example with the tests container
+        if: ${{ always() }}
+        working-directory: examples/docker-compose
+        run: docker compose -f compose.yaml -f compose.tests.yaml down
       - name: Test the Testcontainers example
         run: python -m pytest examples/testcontainers
 
